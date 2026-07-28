@@ -20,9 +20,15 @@ export async function saveConnection(extracted: ExtractedConnection, rawTranscri
       name: extracted.name,
       role: extracted.role ?? null,
       company: extracted.company ?? null,
+      school: extracted.school ?? null,
       notes: extracted.context ?? null,
-      raw_transcript: rawTranscript,
+      raw_transcript: rawTranscript || null,
       met_at: extracted.met_at ?? null,
+      phone: extracted.phone ?? null,
+      email: extracted.email ?? null,
+      instagram: extracted.instagram ?? null,
+      twitter: extracted.twitter ?? null,
+      group_id: extracted.group_id ?? null,
     })
     .select()
     .single();
@@ -43,13 +49,47 @@ export async function saveConnection(extracted: ExtractedConnection, rawTranscri
     throw new Error(connectionError.message);
   }
 
+  // "Also knows" names become person↔person edges. Each name matches an
+  // existing person case-insensitively, or gets a stub person row so the
+  // network still shows them.
+  for (const known of extracted.also_knows ?? []) {
+    const name = known.name.trim();
+    if (!name || name.toLowerCase() === extracted.name.trim().toLowerCase()) continue;
+
+    const { data: existing } = await supabase
+      .from("people")
+      .select("id")
+      .ilike("name", name)
+      .limit(1)
+      .maybeSingle();
+
+    let otherId = existing?.id as string | undefined;
+    if (!otherId) {
+      const { data: stub, error: stubError } = await supabase
+        .from("people")
+        .insert({ user_id: user.id, name })
+        .select()
+        .single();
+      if (stubError || !stub) continue;
+      otherId = stub.id as string;
+    }
+
+    await supabase.from("connections").insert({
+      user_id: user.id,
+      from_person_id: person.id,
+      to_person_id: otherId,
+      relationship_type: "other",
+      label: known.relationship?.trim() || null,
+    });
+  }
+
   if (extracted.follow_up_hours) {
     const dueAt = new Date(Date.now() + extracted.follow_up_hours * 60 * 60 * 1000);
     const { error: followUpError } = await supabase.from("follow_ups").insert({
       user_id: user.id,
       person_id: person.id,
       due_at: dueAt.toISOString(),
-      notes: extracted.context ?? null,
+      notes: extracted.follow_up_about ?? extracted.context ?? null,
     });
 
     if (followUpError) {

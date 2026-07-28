@@ -13,7 +13,7 @@ export function FollowUpActions({ followUpId }: { followUpId: string }) {
           await snoozeFollowUp(followUpId, 24);
           router.refresh();
         }}
-        className="rounded-full border border-neutral-700 px-3 py-1 text-xs text-neutral-300"
+        className="rounded-full border border-neutral-300 dark:border-neutral-500 bg-white dark:bg-neutral-800 px-3 py-1 text-xs text-neutral-900 dark:text-neutral-50"
       >
         Snooze 1 day
       </button>
@@ -22,7 +22,7 @@ export function FollowUpActions({ followUpId }: { followUpId: string }) {
           await completeFollowUp(followUpId);
           router.refresh();
         }}
-        className="rounded-full bg-neutral-50 px-3 py-1 text-xs font-medium text-neutral-900"
+        className="rounded-full bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 px-3 py-1 text-xs font-medium text-neutral-50 ring-1 ring-neutral-700"
       >
         Mark done
       </button>

@@ -25,3 +25,4 @@ export async function snoozeFollowUp(followUpId: string, hours: number) {
   if (error) throw new Error(error.message);
   revalidatePath("/");
 }
+

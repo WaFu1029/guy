@@ -45,23 +45,23 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-neutral-950 px-4">
-      <div className="w-full max-w-sm rounded-xl border border-neutral-800 bg-neutral-900 p-6">
-        <h1 className="mb-1 text-xl font-semibold text-neutral-50">Guy</h1>
-        <p className="mb-6 text-sm text-neutral-400">I know a Guy™ — sign in to your network.</p>
+    <div className="flex min-h-screen items-center justify-center bg-white dark:bg-neutral-800 px-4 dark:bg-neutral-950">
+      <div className="w-full max-w-sm rounded-3xl bg-neutral-100 dark:bg-neutral-900 p-6">
+        <h1 className="mb-1 text-xl font-bold text-neutral-900 dark:text-neutral-50">Guy.</h1>
+        <p className="mb-6 text-sm text-neutral-500 dark:text-neutral-400">I know a Guy™ — sign in to your network.</p>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <label className="text-sm text-neutral-300">
+          <label className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
             Email
             <input
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-800 px-3 py-2 text-neutral-50 outline-none focus:border-neutral-500"
+              className="mt-1 w-full rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 font-normal text-neutral-900 dark:text-neutral-50 outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
             />
           </label>
-          <label className="text-sm text-neutral-300">
+          <label className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
             Password
             <input
               type="password"
@@ -69,17 +69,17 @@ export default function LoginPage() {
               minLength={6}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-800 px-3 py-2 text-neutral-50 outline-none focus:border-neutral-500"
+              className="mt-1 w-full rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 font-normal text-neutral-900 dark:text-neutral-50 outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
             />
           </label>
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          {info && <p className="text-sm text-emerald-400">{info}</p>}
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          {info && <p className="text-sm text-emerald-700">{info}</p>}
 
           <button
             type="submit"
             disabled={loading}
-            className="mt-2 rounded-md bg-neutral-50 px-3 py-2 text-sm font-medium text-neutral-900 disabled:opacity-50"
+            className="mt-2 rounded-full bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:text-neutral-50 px-3 py-2.5 text-sm font-medium text-neutral-50 disabled:opacity-50"
           >
             {loading ? "Working..." : mode === "sign-in" ? "Sign in" : "Create account"}
           </button>
@@ -92,7 +92,7 @@ export default function LoginPage() {
             setError(null);
             setInfo(null);
           }}
-          className="mt-4 text-sm text-neutral-400 underline underline-offset-2 hover:text-neutral-200"
+          className="mt-4 text-sm text-neutral-500 dark:text-neutral-400 underline underline-offset-2 hover:text-neutral-900 dark:text-neutral-50"
         >
           {mode === "sign-in" ? "Need an account? Sign up" : "Already have an account? Sign in"}
         </button>

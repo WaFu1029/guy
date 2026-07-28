@@ -6,6 +6,16 @@ const PUBLIC_PATHS = ["/login", "/auth/callback"];
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
+  // Without Supabase credentials (fresh clone, no .env.local) auth can't work
+  // at all — skip session handling so credential-free pages like /demo render
+  // instead of the whole app 500ing in middleware.
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    if (request.nextUrl.pathname !== "/demo") {
+      return NextResponse.redirect(new URL("/demo", request.url));
+    }
+    return response;
+  }
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,

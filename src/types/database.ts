@@ -1,13 +1,28 @@
 export type RelationshipType = "met_at_event" | "introduced_by" | "works_with" | "other";
 export type FollowUpStatus = "pending" | "completed" | "snoozed" | "dismissed";
 
-export type Person = {
+export type Group = {
   id: string;
   user_id: string;
   name: string;
+  color: string;
+  description: string | null;
+  created_at: string;
+};
+
+export type Person = {
+  id: string;
+  user_id: string;
+  group_id: string | null;
+  name: string;
   role: string | null;
   company: string | null;
+  school: string | null;
   notes: string | null;
+  phone: string | null;
+  email: string | null;
+  instagram: string | null;
+  twitter: string | null;
   raw_transcript: string | null;
   met_at: string | null;
   met_date: string;
@@ -38,6 +53,12 @@ export type FollowUp = {
 export type Database = {
   public: {
     Tables: {
+      groups: {
+        Row: Group;
+        Insert: Partial<Group> & { user_id: string; name: string; color: string };
+        Update: Partial<Group>;
+        Relationships: [];
+      };
       people: {
         Row: Person;
         Insert: Partial<Person> & { user_id: string; name: string };

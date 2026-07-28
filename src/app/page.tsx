@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { ConnectionGraph } from "@/components/ConnectionGraph";
-import { ReminderBanner, type DueFollowUp } from "@/components/ReminderBanner";
+import { FollowUpBar, type DueFollowUp } from "@/components/FollowUpBar";
 
 export default async function HomePage() {
   const supabase = await createClient();
@@ -11,9 +11,11 @@ export default async function HomePage() {
 
   if (!user) return null;
 
-  const [{ data: people }, { data: connections }, { data: dueFollowUps }] = await Promise.all([
+  const [{ data: people }, { data: connections }, { data: groups }, { data: dueFollowUps }] =
+    await Promise.all([
     supabase.from("people").select("*").order("created_at", { ascending: false }),
     supabase.from("connections").select("*"),
+    supabase.from("groups").select("*").order("created_at", { ascending: true }),
     supabase
       .from("follow_ups")
       .select("*, people(name)")
@@ -28,33 +30,34 @@ export default async function HomePage() {
   }));
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-neutral-50">Your network</h1>
-          <p className="text-sm text-neutral-400">
-            {people?.length ?? 0} connection{(people?.length ?? 0) === 1 ? "" : "s"}
-          </p>
-        </div>
-        <Link
-          href="/capture"
-          className="rounded-full bg-neutral-50 px-4 py-2 text-sm font-medium text-neutral-900"
-        >
-          Log a connection
-        </Link>
-      </div>
-
-      <ReminderBanner followUps={followUps} />
-
+    // TopNav is 3.75rem tall (pt-6 + text-xl line + pb-2); the page takes
+    // exactly the rest of the viewport so the graph + bar always end at the
+    // bottom edge — no overflow, no dead space.
+    <div className="mx-auto flex h-[calc(100dvh-3.75rem)] w-full max-w-md flex-col gap-3 px-4 pb-4 pt-2">
       {people && people.length > 0 ? (
-        <div className="mt-6">
-          <ConnectionGraph people={people} connections={connections ?? []} />
-        </div>
+        <>
+          <div className="min-h-0 flex-1">
+            <ConnectionGraph
+              people={people}
+              connections={connections ?? []}
+              groups={groups ?? []}
+            />
+          </div>
+          <div className="shrink-0">
+            <FollowUpBar followUps={followUps} />
+          </div>
+        </>
       ) : (
-        <div className="mt-6 rounded-xl border border-neutral-800 bg-neutral-900 p-10 text-center">
-          <p className="text-sm text-neutral-400">
-            No connections yet. Head to a networking event and log the first person you meet.
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-3xl bg-neutral-100 dark:bg-neutral-900 p-8 text-center">
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+            No connections yet. Log the first person you meet.
           </p>
+          <Link
+            href="/log"
+            className="rounded-full bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:text-neutral-50 px-5 py-2.5 text-sm font-medium text-neutral-50"
+          >
+            Log a connection
+          </Link>
         </div>
       )}
     </div>
