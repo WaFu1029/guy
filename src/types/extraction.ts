@@ -14,6 +14,7 @@ export interface ExtractedConnection {
   school?: string;
   met_at?: string;
   context?: string;
+  how_they_help?: string;
   phone?: string;
   email?: string;
   instagram?: string;
@@ -23,6 +24,8 @@ export interface ExtractedConnection {
   group_name?: string;
   // Not AI-extracted — chosen in the log form.
   group_id?: string;
+  // Lead heat, 1 (cold) … 5 (hot). Chosen in the log form, or spoken.
+  lead_heat?: number;
   relationship_type?: RelationshipType;
   relationship_label?: string;
   follow_up_hours?: number;
@@ -37,6 +40,8 @@ export interface PersonUpdate {
   company?: string;
   school?: string;
   met_at?: string;
+  how_they_help?: string;
+  lead_heat?: number;
   phone?: string;
   email?: string;
   instagram?: string;

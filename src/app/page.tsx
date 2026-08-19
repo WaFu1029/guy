@@ -1,16 +1,16 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { ConnectionGraph } from "@/components/ConnectionGraph";
-import { FollowUpBar, type DueFollowUp } from "@/components/FollowUpBar";
+import { NetworkDesk } from "@/components/NetworkDesk";
+import type { DueFollowUp } from "@/components/FollowUpBar";
 
 export default async function HomePage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
 
-  if (!user) return null;
-
+  // Deliberately no getUser() here. proxy.ts already redirects signed-out
+  // requests to /login, and every query below is scoped by RLS
+  // (auth.uid() = user_id) — so the check guarded nothing, while costing a
+  // second sequential round trip to the Supabase auth server (~150ms) before
+  // any data fetching could start.
   const [{ data: people }, { data: connections }, { data: groups }, { data: dueFollowUps }] =
     await Promise.all([
     supabase.from("people").select("*").order("created_at", { ascending: false }),
@@ -31,22 +31,16 @@ export default async function HomePage() {
 
   return (
     // TopNav is 3.75rem tall (pt-6 + text-xl line + pb-2); the page takes
-    // exactly the rest of the viewport so the graph + bar always end at the
+    // exactly the rest of the viewport so the graph + panels always end at the
     // bottom edge — no overflow, no dead space.
-    <div className="mx-auto flex h-[calc(100dvh-3.75rem)] w-full max-w-md flex-col gap-3 px-4 pb-4 pt-2">
+    <div className="mx-auto flex h-[calc(100dvh-3.75rem)] w-full max-w-md flex-col gap-3 px-4 pb-4 pt-2 lg:max-w-7xl lg:px-7">
       {people && people.length > 0 ? (
-        <>
-          <div className="min-h-0 flex-1">
-            <ConnectionGraph
-              people={people}
-              connections={connections ?? []}
-              groups={groups ?? []}
-            />
-          </div>
-          <div className="shrink-0">
-            <FollowUpBar followUps={followUps} />
-          </div>
-        </>
+        <NetworkDesk
+          people={people}
+          connections={connections ?? []}
+          groups={groups ?? []}
+          followUps={followUps}
+        />
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-3xl bg-neutral-100 dark:bg-neutral-900 p-8 text-center">
           <p className="text-sm text-neutral-500 dark:text-neutral-400">

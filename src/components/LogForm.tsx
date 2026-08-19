@@ -1,25 +1,42 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { saveConnection } from "@/app/log/actions";
 import { createGroup } from "@/app/groups/actions";
 import type { ExtractedConnection } from "@/types/extraction";
+import { PersonSuggestInput, type SuggestPerson } from "@/components/PersonSuggestInput";
 import type { Group } from "@/types/database";
 
 type Status = "idle" | "recording" | "processing" | "saving";
 
+// Lead heat, 1 (cold) … 5 (hot) — a quick gut rating at capture time.
+const LEAD_HEAT_OPTIONS = [1, 2, 3, 4, 5] as const;
+
 const FOLLOW_UP_OPTIONS = [
   { label: "None", hours: undefined },
+  { label: "Tonight", hours: 8 },
   { label: "1 day", hours: 24 },
   { label: "2 days", hours: 48 },
+  { label: "3 days", hours: 72 },
   { label: "1 week", hours: 168 },
+  { label: "2 weeks", hours: 336 },
+  { label: "1 month", hours: 720 },
+  { label: "3 months", hours: 2160 },
 ];
+
+// Snap an arbitrary hour count onto the closest chip so the choice is always
+// visible in the form.
+function nearestFollowUp(hours: number): number {
+  const offered = FOLLOW_UP_OPTIONS.map((o) => o.hours).filter((h): h is number => h !== undefined);
+  return offered.reduce((best, h) => (Math.abs(h - hours) < Math.abs(best - hours) ? h : best));
+}
 
 type Fields = {
   name: string;
   alsoKnows: string;
   whatTheyDo: string;
+  howTheyHelp: string;
   company: string;
   school: string;
   event: string;
@@ -33,6 +50,7 @@ const EMPTY_FIELDS: Fields = {
   name: "",
   alsoKnows: "",
   whatTheyDo: "",
+  howTheyHelp: "",
   company: "",
   school: "",
   event: "",
@@ -48,10 +66,13 @@ const EMPTY_FIELDS: Fields = {
 export function LogForm({
   groups: initialGroups,
   peopleContext = [],
+  networkPeople = [],
 }: {
   groups: Group[];
   // One summary line per existing contact (name — role · company — notes…).
   peopleContext?: string[];
+  // Existing contacts, for the name autocomplete on the person fields.
+  networkPeople?: SuggestPerson[];
 }) {
   const router = useRouter();
   // Local copy so an inline-created group is selectable immediately.
@@ -66,6 +87,7 @@ export function LogForm({
   // Kept from extraction even though the form doesn't show it — the graph and
   // person page still use role.
   const [role, setRole] = useState("");
+  const [leadHeat, setLeadHeat] = useState<number | undefined>(undefined);
   const [followUpHours, setFollowUpHours] = useState<number | undefined>(undefined);
   const [followUpAbout, setFollowUpAbout] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -77,8 +99,217 @@ export function LogForm({
   // the text field carries names only, this carries the edge labels.
   const [alsoKnowsRel, setAlsoKnowsRel] = useState<Record<string, string>>({});
 
-  const set = (key: keyof Fields) => (value: string) =>
+  // Fields the user edited by hand mid-recording. Live extraction leaves those
+  // alone, so a typed correction can't be overwritten by a later interim pass.
+  const manualEditsRef = useRef<Set<keyof Fields>>(new Set());
+  // Same idea for the chip choices, which aren't text fields.
+  const manualChoicesRef = useRef<Set<"group" | "leadHeat" | "followUp">>(new Set());
+  const chose = (choice: "group" | "leadHeat" | "followUp") => {
+    if (statusRef.current === "recording") manualChoicesRef.current.add(choice);
+  };
+  // Latest values for the live-extraction loop, which runs outside of render.
+  const fieldsRef = useRef(fields);
+  const roleRef = useRef(role);
+  const statusRef = useRef<Status>(status);
+  useEffect(() => {
+    fieldsRef.current = fields;
+  }, [fields]);
+  useEffect(() => {
+    roleRef.current = role;
+  }, [role]);
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  const set = (key: keyof Fields) => (value: string) => {
+    if (statusRef.current === "recording") manualEditsRef.current.add(key);
     setFields((f) => ({ ...f, [key]: value }));
+  };
+
+  // Send the current draft + the user's groups and contacts so a follow-on
+  // pass merges (pronouns resolve, "put him under builders" works, mentioned
+  // names match existing people).
+  function buildDraft(): Record<string, string> {
+    const cur = fieldsRef.current;
+    const draft: Record<string, string> = {};
+    if (cur.name.trim()) draft.name = cur.name.trim();
+    if (roleRef.current.trim()) draft.role = roleRef.current.trim();
+    if (cur.company.trim()) draft.company = cur.company.trim();
+    if (cur.school.trim()) draft.school = cur.school.trim();
+    if (cur.whatTheyDo.trim()) draft.notes = cur.whatTheyDo.trim();
+    if (cur.howTheyHelp.trim()) draft.how_they_help = cur.howTheyHelp.trim();
+    if (cur.event.trim()) draft.met_because = cur.event.trim();
+    return draft;
+  }
+
+  async function requestExtraction(
+    transcript: string,
+    opts: { interim: boolean; signal?: AbortSignal }
+  ): Promise<ExtractedConnection> {
+    const res = await fetch("/api/extract", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: opts.signal,
+      body: JSON.stringify({
+        transcript,
+        draft: buildDraft(),
+        groups: groups.map((g) => g.name),
+        people: peopleContext,
+        interim: opts.interim,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error ?? "Extraction failed");
+    }
+    const { extracted } = (await res.json()) as { extracted: ExtractedConnection };
+    return extracted;
+  }
+
+  // Merge into the draft instead of replacing it: a non-empty extracted value
+  // wins (spoken corrections apply), an omitted one keeps what's there, notes
+  // append, and "also knows" unions.
+  async function applyExtracted(extracted: ExtractedConnection, opts: { live: boolean }) {
+    setFields((cur) => {
+      const keep = (key: keyof Fields) => opts.live && manualEditsRef.current.has(key);
+      const pick = (key: keyof Fields, next: string | undefined) =>
+        keep(key) ? cur[key] : next?.trim() || cur[key];
+      const union = (prev: string, next: { name: string }[] | undefined) => {
+        const seen = new Set(
+          prev.split(",").map((n) => n.trim()).filter(Boolean).map((n) => n.toLowerCase())
+        );
+        const merged = prev.split(",").map((n) => n.trim()).filter(Boolean);
+        for (const k of next ?? []) {
+          if (!seen.has(k.name.trim().toLowerCase())) merged.push(k.name.trim());
+        }
+        return merged.join(", ");
+      };
+      let appended = pick("whatTheyDo", extracted.context);
+      const curNotes = cur.whatTheyDo.trim();
+      const nextNotes = extracted.context?.trim() ?? "";
+      if (!keep("whatTheyDo") && curNotes && nextNotes && !curNotes.includes(nextNotes)) {
+        // If the model restated the draft with new text tacked on, keep only
+        // the new tail; otherwise append.
+        const tail = nextNotes.startsWith(curNotes)
+          ? nextNotes.slice(curNotes.length).replace(/^[\s.,;—-]+/, "")
+          : nextNotes;
+        appended = tail ? `${curNotes}\n${tail}` : curNotes;
+      }
+      return {
+        name: pick("name", extracted.name),
+        alsoKnows: keep("alsoKnows")
+          ? cur.alsoKnows
+          : union(cur.alsoKnows, extracted.also_knows),
+        whatTheyDo: appended,
+        howTheyHelp: pick("howTheyHelp", extracted.how_they_help),
+        event: pick("event", extracted.met_at),
+        company: pick("company", extracted.company),
+        school: pick("school", extracted.school),
+        phone: pick("phone", extracted.phone),
+        email: pick("email", extracted.email),
+        instagram: pick("instagram", extracted.instagram),
+        twitter: pick("twitter", extracted.twitter),
+      };
+    });
+    setAlsoKnowsRel((cur) => {
+      const next = { ...cur };
+      for (const k of extracted.also_knows ?? []) {
+        if (k.relationship?.trim()) next[k.name.trim().toLowerCase()] = k.relationship.trim();
+      }
+      return next;
+    });
+    if (extracted.role?.trim()) setRole(extracted.role.trim());
+    const held = (choice: "group" | "leadHeat" | "followUp") =>
+      opts.live && manualChoicesRef.current.has(choice);
+    if (extracted.group_name && !held("group")) {
+      const match = groups.find(
+        (g) => g.name.toLowerCase() === extracted.group_name!.trim().toLowerCase()
+      );
+      if (match) {
+        setGroupId(match.id);
+      } else if (!opts.live) {
+        // Spoken group that doesn't exist yet — create it on the spot
+        // (createGroup dedupes by name and auto-assigns the next color).
+        // Never during a live pass: a half-heard sentence shouldn't leave a
+        // stray group behind.
+        try {
+          const group = await createGroup(extracted.group_name);
+          setGroups((cur) => (cur.some((g) => g.id === group.id) ? cur : [...cur, group]));
+          setGroupId(group.id);
+        } catch {
+          // Group creation failing shouldn't sink the extraction.
+        }
+      }
+    }
+    if (typeof extracted.lead_heat === "number" && !held("leadHeat")) {
+      const heat = Math.round(extracted.lead_heat);
+      if (heat >= 1 && heat <= 5) setLeadHeat(heat);
+    }
+    // The model is told to snap to the offered options, but a stray value
+    // ("in about 5 days") would leave no chip selected — snap it here too.
+    if (extracted.follow_up_hours && !held("followUp")) {
+      setFollowUpHours(nearestFollowUp(extracted.follow_up_hours));
+    }
+    if (extracted.follow_up_about && !held("followUp")) {
+      setFollowUpAbout(extracted.follow_up_about);
+    }
+  }
+
+  // Live fill: every pause in speech kicks off an interim extraction against
+  // the transcript so far, so the form populates while the user is still
+  // talking instead of only on stop.
+  const LIVE_DEBOUNCE_MS = 1100;
+  const LIVE_MIN_NEW_CHARS = 12;
+  const liveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const liveAbortRef = useRef<AbortController | null>(null);
+  const liveBusyRef = useRef(false);
+  const liveSentRef = useRef("");
+  const [liveFilling, setLiveFilling] = useState(false);
+
+  const runLiveExtract = async () => {
+    if (statusRef.current !== "recording") return;
+    const transcript = transcriptRef.current;
+    if (transcript.length - liveSentRef.current.length < LIVE_MIN_NEW_CHARS) return;
+    // One interim pass at a time; whatever was said meanwhile goes in the next.
+    if (liveBusyRef.current) {
+      scheduleLiveExtract();
+      return;
+    }
+    liveBusyRef.current = true;
+    liveSentRef.current = transcript;
+    setLiveFilling(true);
+    const controller = new AbortController();
+    liveAbortRef.current = controller;
+    try {
+      const extracted = await requestExtraction(transcript, {
+        interim: true,
+        signal: controller.signal,
+      });
+      if (statusRef.current === "recording") await applyExtracted(extracted, { live: true });
+    } catch {
+      // Interim passes fail silently — the final pass on stop is authoritative.
+    } finally {
+      liveBusyRef.current = false;
+      liveAbortRef.current = null;
+      setLiveFilling(false);
+    }
+  };
+
+  const scheduleLiveExtract = () => {
+    if (liveTimerRef.current) clearTimeout(liveTimerRef.current);
+    liveTimerRef.current = setTimeout(runLiveExtract, LIVE_DEBOUNCE_MS);
+  };
+
+  const cancelLiveExtract = () => {
+    if (liveTimerRef.current) clearTimeout(liveTimerRef.current);
+    liveTimerRef.current = null;
+    liveAbortRef.current?.abort();
+    liveAbortRef.current = null;
+    liveBusyRef.current = false;
+    setLiveFilling(false);
+  };
+
+  useEffect(() => cancelLiveExtract, []);
 
   function startRecording() {
     setError(null);
@@ -99,13 +330,18 @@ export function LogForm({
     let finalTranscript = "";
     recognition.onresult = (event) => {
       let interim = "";
+      let settled = false;
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
-        if (result.isFinal) finalTranscript += result[0].transcript + " ";
-        else interim += result[0].transcript;
+        if (result.isFinal) {
+          finalTranscript += result[0].transcript + " ";
+          settled = true;
+        } else interim += result[0].transcript;
       }
       transcriptRef.current = finalTranscript.trim();
       setLiveTranscript((finalTranscript + interim).trim());
+      // Only a settled phrase is worth extracting; interim words churn.
+      if (settled) scheduleLiveExtract();
     };
     recognition.onerror = (event) => {
       setError(`Speech recognition error: ${event.error}`);
@@ -113,6 +349,9 @@ export function LogForm({
     };
 
     transcriptRef.current = "";
+    liveSentRef.current = "";
+    manualEditsRef.current = new Set();
+    manualChoicesRef.current = new Set();
     setLiveTranscript("");
     recognitionRef.current = recognition;
     recognition.start();
@@ -121,6 +360,7 @@ export function LogForm({
 
   async function stopAndExtract() {
     recognitionRef.current?.stop();
+    cancelLiveExtract();
     setStatus("processing");
 
     // onresult can land slightly after stop(); give it a beat.
@@ -133,100 +373,8 @@ export function LogForm({
     }
 
     try {
-      // Send the current draft + the user's groups and contacts so a second
-      // recording merges (pronouns resolve, "put him under builders" works,
-      // mentioned names match existing people).
-      const draft: Record<string, string> = {};
-      if (fields.name.trim()) draft.name = fields.name.trim();
-      if (role.trim()) draft.role = role.trim();
-      if (fields.company.trim()) draft.company = fields.company.trim();
-      if (fields.school.trim()) draft.school = fields.school.trim();
-      if (fields.whatTheyDo.trim()) draft.notes = fields.whatTheyDo.trim();
-      if (fields.event.trim()) draft.met_because = fields.event.trim();
-
-      const res = await fetch("/api/extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          transcript,
-          draft,
-          groups: groups.map((g) => g.name),
-          people: peopleContext,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? "Extraction failed");
-      }
-      const { extracted } = (await res.json()) as { extracted: ExtractedConnection };
-
-      // Merge into the draft instead of replacing it: a non-empty extracted
-      // value wins (spoken corrections apply), an omitted one keeps what's
-      // there, notes append, and "also knows" unions.
-      setFields((cur) => {
-        const pick = (next: string | undefined, prev: string) => next?.trim() || prev;
-        const union = (prev: string, next: { name: string }[] | undefined) => {
-          const seen = new Set(
-            prev.split(",").map((n) => n.trim()).filter(Boolean).map((n) => n.toLowerCase())
-          );
-          const merged = prev.split(",").map((n) => n.trim()).filter(Boolean);
-          for (const k of next ?? []) {
-            if (!seen.has(k.name.trim().toLowerCase())) merged.push(k.name.trim());
-          }
-          return merged.join(", ");
-        };
-        let appended = pick(extracted.context, cur.whatTheyDo);
-        const curNotes = cur.whatTheyDo.trim();
-        const nextNotes = extracted.context?.trim() ?? "";
-        if (curNotes && nextNotes && !curNotes.includes(nextNotes)) {
-          // If the model restated the draft with new text tacked on, keep only
-          // the new tail; otherwise append.
-          const tail = nextNotes.startsWith(curNotes)
-            ? nextNotes.slice(curNotes.length).replace(/^[\s.,;—-]+/, "")
-            : nextNotes;
-          appended = tail ? `${curNotes}\n${tail}` : curNotes;
-        }
-        return {
-          name: pick(extracted.name, cur.name),
-          alsoKnows: union(cur.alsoKnows, extracted.also_knows),
-          whatTheyDo: appended,
-          event: pick(extracted.met_at, cur.event),
-          company: pick(extracted.company, cur.company),
-          school: pick(extracted.school, cur.school),
-          phone: pick(extracted.phone, cur.phone),
-          email: pick(extracted.email, cur.email),
-          instagram: pick(extracted.instagram, cur.instagram),
-          twitter: pick(extracted.twitter, cur.twitter),
-        };
-      });
-      setAlsoKnowsRel((cur) => {
-        const next = { ...cur };
-        for (const k of extracted.also_knows ?? []) {
-          if (k.relationship?.trim()) next[k.name.trim().toLowerCase()] = k.relationship.trim();
-        }
-        return next;
-      });
-      if (extracted.role?.trim()) setRole(extracted.role.trim());
-      if (extracted.group_name) {
-        const match = groups.find(
-          (g) => g.name.toLowerCase() === extracted.group_name!.trim().toLowerCase()
-        );
-        if (match) {
-          setGroupId(match.id);
-        } else {
-          // Spoken group that doesn't exist yet — create it on the spot
-          // (createGroup dedupes by name and auto-assigns the next color).
-          try {
-            const group = await createGroup(extracted.group_name);
-            setGroups((cur) => (cur.some((g) => g.id === group.id) ? cur : [...cur, group]));
-            setGroupId(group.id);
-          } catch {
-            // Group creation failing shouldn't sink the extraction.
-          }
-        }
-      }
-      if (extracted.follow_up_hours) setFollowUpHours(extracted.follow_up_hours);
-      if (extracted.follow_up_about) setFollowUpAbout(extracted.follow_up_about);
+      const extracted = await requestExtraction(transcript, { interim: false });
+      await applyExtracted(extracted, { live: false });
       setStatus("idle");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Extraction failed");
@@ -250,11 +398,13 @@ export function LogForm({
           met_at: fields.event.trim() || undefined,
           school: fields.school.trim() || undefined,
           context: fields.whatTheyDo.trim() || undefined,
+          how_they_help: fields.howTheyHelp.trim() || undefined,
           phone: fields.phone.trim() || undefined,
           email: fields.email.trim() || undefined,
           instagram: fields.instagram.trim().replace(/^@/, "") || undefined,
           twitter: fields.twitter.trim().replace(/^@/, "") || undefined,
           group_id: groupId ?? undefined,
+          lead_heat: leadHeat,
           also_knows: fields.alsoKnows
             .split(",")
             .map((n) => n.trim())
@@ -268,6 +418,7 @@ export function LogForm({
       setFields(EMPTY_FIELDS);
       setRole("");
       setGroupId(null);
+      setLeadHeat(undefined);
       setAlsoKnowsRel({});
       setFollowUpHours(undefined);
       setFollowUpAbout("");
@@ -281,21 +432,43 @@ export function LogForm({
     }
   }
 
-  const rows: { key: keyof Fields; label: string; placeholder?: string }[] = [
-    { key: "name", label: "Name" },
-    { key: "whatTheyDo", label: "What they Do" },
+  // Full-width rows. "What they Do" is a textarea — it usually holds a few
+  // sentences of spoken context, so it opens at four lines instead of one.
+  const rows: {
+    key: keyof Fields;
+    label: string;
+    placeholder?: string;
+    multiline?: boolean;
+    // Textarea height; defaults to four lines.
+    lines?: number;
+    // Autocomplete against the existing network: "single" completes the whole
+    // field, "csv" completes only the name after the last comma.
+    suggest?: "single" | "csv";
+  }[] = [
+    { key: "name", label: "Name", placeholder: "who did you meet?", suggest: "single" },
+    {
+      key: "whatTheyDo",
+      label: "What they Do",
+      placeholder: "what they work on, what they're looking for, anything worth remembering",
+      multiline: true,
+    },
+    {
+      key: "howTheyHelp",
+      label: "How they can help",
+      placeholder: "the role you see them playing — intro, hire, customer, advice…",
+      multiline: true,
+      lines: 3,
+    },
+    { key: "alsoKnows", label: "Also knows…", placeholder: "names, comma-sep", suggest: "csv" },
+    { key: "event", label: "Met because…", placeholder: "how you met" },
   ];
 
   const halfInput =
     "mt-1 w-full rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300";
   const halfRows: [keyof Fields, string, string][][] = [
     [
-      ["alsoKnows", "Also knows…", "names, comma-sep"],
-      ["event", "Met because…", "how you met"],
-    ],
-    [
-      ["school", "School", ""],
-      ["company", "Company", ""],
+      ["school", "School", "where they studied"],
+      ["company", "Company", "where they work"],
     ],
   ];
 
@@ -307,17 +480,39 @@ export function LogForm({
   ];
 
   return (
-    <div className="flex flex-1 flex-col rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-6">
-      <div className="flex flex-col gap-4">
+    // Phone: one column, record circle pinned to the bottom. Desktop: two
+    // columns — the person's details on the left, the group / follow-up
+    // choices and the voice controls on the right.
+    <div className="flex flex-1 flex-col rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-6 lg:flex-row lg:items-stretch lg:gap-8 lg:px-8 lg:py-8">
+      <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1">
         {rows.map((row) => (
           <label key={row.key} className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
             {row.label}
-            <input
-              value={fields[row.key]}
-              onChange={(e) => set(row.key)(e.target.value)}
-              placeholder={status === "recording" ? "Listening…" : (row.placeholder ?? "")}
-              className="mt-1 w-full rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
-            />
+            {row.suggest ? (
+              <PersonSuggestInput
+                value={fields[row.key]}
+                onChange={set(row.key)}
+                people={networkPeople}
+                mode={row.suggest}
+                placeholder={status === "recording" ? "Listening…" : (row.placeholder ?? "")}
+                className="mt-1 w-full rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
+              />
+            ) : row.multiline ? (
+              <textarea
+                rows={row.lines ?? 4}
+                value={fields[row.key]}
+                onChange={(e) => set(row.key)(e.target.value)}
+                placeholder={status === "recording" ? "Listening…" : (row.placeholder ?? "")}
+                className="mt-1 w-full resize-y rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
+              />
+            ) : (
+              <input
+                value={fields[row.key]}
+                onChange={(e) => set(row.key)(e.target.value)}
+                placeholder={status === "recording" ? "Listening…" : (row.placeholder ?? "")}
+                className="mt-1 w-full rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
+              />
+            )}
           </label>
         ))}
 
@@ -351,7 +546,11 @@ export function LogForm({
             ))}
           </div>
         </div>
+      </div>
 
+      {/* Right column on desktop: the taxonomy choices (group, follow-up)
+          plus the voice controls. Stacks under the fields on phones. */}
+      <div className="mt-4 flex flex-col gap-4 lg:mt-0 lg:w-[380px] lg:shrink-0 xl:w-[420px]">
         <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
           Group
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
@@ -361,7 +560,10 @@ export function LogForm({
                 <button
                   key={g.id}
                   type="button"
-                  onClick={() => setGroupId(active ? null : g.id)}
+                  onClick={() => {
+                    chose("group");
+                    setGroupId(active ? null : g.id);
+                  }}
                   className={
                     "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-normal " +
                     (active
@@ -438,13 +640,49 @@ export function LogForm({
         </div>
 
         <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+          Lead heat
+          <div className="mt-1.5 flex items-center gap-2">
+            {LEAD_HEAT_OPTIONS.map((n) => {
+              const active = leadHeat !== undefined && n <= leadHeat;
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  // Tapping the current rating clears it — heat stays optional.
+                  onClick={() => {
+                    chose("leadHeat");
+                    setLeadHeat(leadHeat === n ? undefined : n);
+                  }}
+                  aria-pressed={leadHeat === n}
+                  aria-label={`Lead heat ${n} of 5`}
+                  className={
+                    "h-9 w-9 rounded-full text-xs font-medium " +
+                    (active
+                      ? "bg-neutral-900 text-neutral-50 dark:bg-neutral-100 dark:text-neutral-900"
+                      : "bg-white text-neutral-400 dark:bg-neutral-800 dark:text-neutral-500")
+                  }
+                >
+                  {n}
+                </button>
+              );
+            })}
+            <span className="ml-1 text-xs font-normal text-neutral-500 dark:text-neutral-400">
+              {leadHeat === undefined ? "unrated" : leadHeat >= 4 ? "hot" : leadHeat >= 3 ? "warm" : "cold"}
+            </span>
+          </div>
+        </div>
+
+        <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
           Follow up
-          <div className="mt-1.5 flex gap-2">
+          <div className="mt-1.5 flex flex-wrap gap-2">
             {FOLLOW_UP_OPTIONS.map((opt) => (
               <button
                 key={opt.label}
                 type="button"
-                onClick={() => setFollowUpHours(opt.hours)}
+                onClick={() => {
+                  chose("followUp");
+                  setFollowUpHours(opt.hours);
+                }}
                 className={
                   followUpHours === opt.hours
                     ? "rounded-full bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:text-neutral-50 px-3 py-1.5 text-xs font-medium text-neutral-50"
@@ -456,18 +694,20 @@ export function LogForm({
             ))}
           </div>
           {followUpHours !== undefined && (
-            <input
+            <textarea
+              rows={3}
               value={followUpAbout}
-              onChange={(e) => setFollowUpAbout(e.target.value)}
+              onChange={(e) => {
+                chose("followUp");
+                setFollowUpAbout(e.target.value);
+              }}
               placeholder="What's the follow-up about?"
-              className="mt-2 w-full rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
+              className="mt-2 w-full resize-y rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
             />
           )}
         </div>
-      </div>
-
-      {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-      {saved && !error && <p className="mt-3 text-sm text-emerald-700">Connection saved.</p>}
+      {error && <p className="mt-3 text-sm text-red-600 lg:mt-0">{error}</p>}
+      {saved && !error && <p className="mt-3 text-sm text-emerald-700 lg:mt-0">Connection saved.</p>}
       {!supported && (
         <p className="mt-3 text-sm text-red-600">
           Voice needs a browser with the Web Speech API (Chrome works best) — you can still type.
@@ -483,6 +723,11 @@ export function LogForm({
               <span className="text-xs font-semibold uppercase tracking-wide text-red-600 dark:text-red-400">
                 Recording
               </span>
+              {liveFilling && (
+                <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                  filling in…
+                </span>
+              )}
               <span className="ml-1 flex h-4 items-center gap-[3px]">
                 {[0, 1, 2, 3, 4].map((i) => (
                   <span
@@ -530,6 +775,7 @@ export function LogForm({
         >
           {status === "saving" ? "Saving…" : "Save"}
         </button>
+      </div>
       </div>
     </div>
   );

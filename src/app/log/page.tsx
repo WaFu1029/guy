@@ -13,10 +13,15 @@ export default async function LogPage() {
   ]);
 
   return (
-    <div className="mx-auto flex w-full max-w-md flex-1 flex-col px-4 pb-6 pt-2">
+    <div className="mx-auto flex w-full max-w-md flex-1 flex-col px-4 pb-6 pt-2 lg:max-w-7xl lg:px-7">
       <LogForm
         groups={groups ?? []}
         peopleContext={(people ?? []).map(personContextLine)}
+        networkPeople={(people ?? []).map((p) => ({
+          name: p.name,
+          role: p.role,
+          company: p.company,
+        }))}
       />
     </div>
   );

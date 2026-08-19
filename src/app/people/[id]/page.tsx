@@ -7,6 +7,7 @@ import { ContactChips } from "@/components/ContactChips";
 import { personContextLine } from "@/lib/personContext";
 import { DeletePersonButton } from "@/components/DeletePersonButton";
 import { ProfileFields } from "@/components/ProfileFields";
+import { LeadHeatPicker } from "@/components/LeadHeatPicker";
 
 export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -38,6 +39,8 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
 
       <div className="mt-3 rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-6">
         <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">{person.name}</h1>
+
+        <LeadHeatPicker personId={person.id} heat={person.lead_heat} />
 
         <ProfileFields person={person} />
 

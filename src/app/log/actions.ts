@@ -22,6 +22,7 @@ export async function saveConnection(extracted: ExtractedConnection, rawTranscri
       company: extracted.company ?? null,
       school: extracted.school ?? null,
       notes: extracted.context ?? null,
+      how_they_help: extracted.how_they_help ?? null,
       raw_transcript: rawTranscript || null,
       met_at: extracted.met_at ?? null,
       phone: extracted.phone ?? null,
@@ -29,6 +30,7 @@ export async function saveConnection(extracted: ExtractedConnection, rawTranscri
       instagram: extracted.instagram ?? null,
       twitter: extracted.twitter ?? null,
       group_id: extracted.group_id ?? null,
+      lead_heat: extracted.lead_heat ?? null,
     })
     .select()
     .single();

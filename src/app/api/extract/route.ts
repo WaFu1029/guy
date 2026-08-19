@@ -36,6 +36,11 @@ const RECORD_CONNECTION_TOOL = {
         description:
           "What this person does and what was discussed — anything worth remembering for a follow-up, including where they study or work (e.g. 'Goes to UC Berkeley'). Write it in the user's own words where possible. Do NOT put how they met here; that belongs in met_at.",
       },
+      how_they_help: {
+        type: "string",
+        description:
+          "The role the user sees this person playing for them, or how they could help — an intro, a hire, a customer, funding, advice. Only when the user says or clearly implies it (e.g. 'he could intro me to investors', 'she'd be a great designer for us'). Omit otherwise — do not invent an angle.",
+      },
       phone: {
         type: "string",
         description: "Their phone number, if mentioned, verbatim.",
@@ -71,6 +76,13 @@ const RECORD_CONNECTION_TOOL = {
         description:
           "Other people this person knows, mentioned in the transcript. Excluding the user. When a mention matches an existing contact — by name or by a relationship reference like \"my mom\" that matches a contact's summary — use that contact's exact name.",
       },
+      lead_heat: {
+        type: "integer",
+        minimum: 1,
+        maximum: 5,
+        description:
+          "How hot a lead this person is, 1 (cold) to 5 (hot), when the user signals it — a stated number ('call him a four'), or a clear verbal cue: 5 for 'huge', 'top priority', 'we have to close this one'; 4 for 'really promising', 'definitely worth chasing'; 3 for 'decent', 'maybe something there'; 2 for 'probably nothing', 'long shot'; 1 for 'dead end', 'waste of time', 'not a fit'. Omit entirely when the user gives no signal — do not infer heat from general enthusiasm about the conversation.",
+      },
       group_name: {
         type: "string",
         description:
@@ -90,7 +102,7 @@ const RECORD_CONNECTION_TOOL = {
       follow_up_hours: {
         type: "number",
         description:
-          "Hours from now until the user wants to follow up, if they stated one (e.g. '12 hours' -> 12, '1 day' -> 24, '2 days' -> 48, 'next week' -> 168). Omit if the user didn't mention a follow-up timeframe.",
+          "Hours from now until the user wants to follow up, if they stated one. Snap to the options the form offers: tonight/later today -> 8, tomorrow/1 day -> 24, 2 days -> 48, a few days/3 days -> 72, next week -> 168, 2 weeks -> 336, a month -> 720, a quarter/3 months -> 2160. Pick the nearest option for anything in between. Omit if the user didn't mention a follow-up timeframe.",
       },
       follow_up_about: {
         type: "string",
@@ -103,7 +115,11 @@ const RECORD_CONNECTION_TOOL = {
 };
 
 export async function POST(request: Request) {
-  const { transcript, draft, groups, people } = await request.json();
+  const { transcript, draft, groups, people, interim } = await request.json();
+  // Interim passes run repeatedly while the user is still talking, so they use
+  // the fast model and tolerate a half-finished sentence; the final pass on
+  // stop still runs on Opus.
+  const isInterim = interim === true;
 
   if (!transcript || typeof transcript !== "string") {
     return NextResponse.json({ error: "transcript is required" }, { status: 400 });
@@ -126,28 +142,44 @@ export async function POST(request: Request) {
     );
   }
 
-  const response = await anthropic.messages.create({
-    model: "claude-opus-5",
-    max_tokens: 1024,
-    thinking: { type: "adaptive" },
-    output_config: { effort: "low" },
-    tool_choice: { type: "tool", name: "record_connection" },
-    tools: [RECORD_CONNECTION_TOOL],
-    messages: [
-      {
-        role: "user",
-        content: `Here is a voice note the user recorded right after meeting someone at a networking event. Extract the connection details.
+  let response;
+  try {
+    response = await anthropic.messages.create({
+      ...(isInterim
+        ? { model: "claude-haiku-4-5-20251001" as const, max_tokens: 1024 }
+        : {
+            model: "claude-opus-5" as const,
+            max_tokens: 1024,
+            thinking: { type: "adaptive" as const },
+            output_config: { effort: "low" as const },
+          }),
+      tool_choice: { type: "tool", name: "record_connection" },
+      tools: [RECORD_CONNECTION_TOOL],
+      messages: [
+        {
+          role: "user",
+          content: `Here is a voice note the user recorded right after meeting someone at a networking event. Extract the connection details.
 
-Only include fields the transcript (or draft) actually supports. Never output placeholder values like "<UNKNOWN>" or "N/A" — omit the field instead. If the draft already has notes, the context field must contain ONLY new information not present in them — never restate what the draft already says.
+  Only include fields the transcript (or draft) actually supports. Never output placeholder values like "<UNKNOWN>" or "N/A" — omit the field instead. If the draft already has notes, the context field must contain ONLY new information not present in them — never restate what the draft already says.
 
-The transcript may mix two kinds of speech: facts about the person, and instructions aimed at this app ("name is Eric Zhang, not John", "actually put him under Family", "no wait, scratch that"). APPLY instructions to the right fields — a name correction changes the name field — but never record the instruction itself as content. Notes must read like notes about the person, not like a conversation with the app.
+  The transcript may mix two kinds of speech: facts about the person, and instructions aimed at this app ("name is Eric Zhang, not John", "actually put him under Family", "no wait, scratch that"). APPLY instructions to the right fields — a name correction changes the name field — but never record the instruction itself as content. Notes must read like notes about the person, not like a conversation with the app.
 
-Never record the ABSENCE of information ("no phone number yet", "didn't catch her email", "don't know where he works") anywhere — a missing fact means the field is simply omitted, not narrated in the notes.
-${contextParts.length > 0 ? "\n" + contextParts.join("\n\n") + "\n" : ""}
-Transcript: "${transcript}"`,
-      },
-    ],
-  });
+  Never record the ABSENCE of information ("no phone number yet", "didn't catch her email", "don't know where he works") anywhere — a missing fact means the field is simply omitted, not narrated in the notes.
+  ${isInterim ? "\nThis transcript is INCOMPLETE — the user is still speaking, and it may end mid-sentence. Extract only what is already clearly stated and omit everything else, including the name if it hasn't been said yet. Do not guess at where a sentence was going.\n" : ""}${contextParts.length > 0 ? "\n" + contextParts.join("\n\n") + "\n" : ""}
+  Transcript: "${transcript}"`,
+        },
+      ],
+    });
+
+  } catch (err) {
+    // Surface the API's own message (bad key, rate limit, overload) instead of
+    // an opaque 500 — the log form shows this text to the user.
+    const status = (err as { status?: number }).status ?? 502;
+    const message =
+      (err as { error?: { error?: { message?: string } } }).error?.error?.message ??
+      (err instanceof Error ? err.message : "Extraction failed");
+    return NextResponse.json({ error: message }, { status: status === 401 ? 401 : 502 });
+  }
 
   if (response.stop_reason === "refusal") {
     return NextResponse.json({ error: "Extraction was declined" }, { status: 422 });
@@ -165,7 +197,13 @@ Transcript: "${transcript}"`,
   if (extracted.name && /unknown|n\/a/i.test(extracted.name)) {
     extracted.name = "";
   }
-  if (!extracted.name && !(draft && typeof draft === "object" && (draft as { name?: string }).name)) {
+  // A partial transcript legitimately has no name yet — only the final pass
+  // treats a nameless extraction as a failure.
+  if (
+    !isInterim &&
+    !extracted.name &&
+    !(draft && typeof draft === "object" && (draft as { name?: string }).name)
+  ) {
     return NextResponse.json({ error: "Could not identify a name in the transcript" }, { status: 422 });
   }
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import {
   forceCenter,
   forceLink,
@@ -21,7 +20,8 @@ import {
   type ZoomBehavior,
   type ZoomTransform,
 } from "d3-zoom";
-import { ContactChips } from "@/components/ContactChips";
+import { PinnedCard } from "@/components/PinnedCard";
+import { deriveOrgHubs, resolvePins } from "@/lib/orgHubs";
 import type { Person, Connection, Group } from "@/types/database";
 
 // Force-directed network view. d3-force simulation (forceLink / forceManyBody /
@@ -38,15 +38,6 @@ type SimNode = SimulationNodeDatum & {
   // Group color; null renders the neutral white node.
   color: string | null;
   groupId: string | null;
-};
-
-// A derived org hub: synthesized at render time when ≥2 people share a
-// company or school (case-insensitive). Never stored.
-type OrgHub = {
-  id: string;
-  kind: "company" | "school";
-  label: string;
-  members: Person[];
 };
 
 type SimLink = {
@@ -76,17 +67,33 @@ export function ConnectionGraph({
   people,
   connections,
   groups = [],
+  pinnedIds: controlledPinnedIds,
+  onPinnedIdsChange,
+  cardsClassName,
 }: {
   people: Person[];
   connections: Connection[];
   groups?: Group[];
+  // Pins are optionally controlled: the desktop layout owns them so the
+  // detail cards can render in the right-hand column instead of over the
+  // graph. Left uncontrolled, the graph keeps its own pin state.
+  pinnedIds?: readonly string[];
+  onPinnedIdsChange?: (next: readonly string[]) => void;
+  // Extra classes for the docked card stack — the desktop layout passes
+  // `lg:hidden` so only the side panel shows the cards at that width.
+  cardsClassName?: string;
 }) {
   const groupById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
   const groupOf = (p: Person | undefined | null): Group | null =>
     (p?.group_id && groupById.get(p.group_id)) || null;
   // Pinned nodes (people or org hubs) — tap toggles a node in/out of the pin
   // set; each pin gets a detail card in the swipeable stack at the bottom.
-  const [pinnedIds, setPinnedIds] = useState<readonly string[]>([]);
+  const [uncontrolledPinnedIds, setUncontrolledPinnedIds] = useState<readonly string[]>([]);
+  const pinnedIds = controlledPinnedIds ?? uncontrolledPinnedIds;
+  const setPinnedIds = (next: (cur: readonly string[]) => readonly string[]) => {
+    if (onPinnedIdsChange) onPinnedIdsChange(next(pinnedIds));
+    else setUncontrolledPinnedIds(next);
+  };
   const togglePin = (id: string) =>
     setPinnedIds((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
 
@@ -179,27 +186,9 @@ export function ConnectionGraph({
       label: c.label,
     }));
 
-    // Derive org hubs: bucket people by company and by school, keep buckets
-    // with ≥2 members, hang the members off a synthesized hub node.
-    const buckets = new Map<string, OrgHub>();
-    for (const p of people) {
-      const sources = [
-        { kind: "company" as const, value: p.company },
-        { kind: "school" as const, value: p.school },
-      ];
-      for (const { kind, value } of sources) {
-        const label = value?.trim();
-        if (!label) continue;
-        const id = `org:${kind}:${label.toLowerCase()}`;
-        const bucket = buckets.get(id) ?? { id, kind, label, members: [] };
-        bucket.members.push(p);
-        buckets.set(id, bucket);
-      }
-    }
-    const orgs = new Map<string, OrgHub>();
-    for (const [id, bucket] of buckets) {
-      if (bucket.members.length < 2) continue;
-      orgs.set(id, bucket);
+    // Derived org hubs get a synthesized node plus a dashed spoke per member.
+    const orgs = deriveOrgHubs(people);
+    for (const [id, bucket] of orgs) {
       nodes.push({
         id,
         kind: "org",
@@ -218,18 +207,7 @@ export function ConnectionGraph({
   }, [people, connections, groups]);
 
   // Resolve pins into cards — a pin is either a person or a derived org hub.
-  const pinnedEntries = useMemo(
-    () =>
-      pinnedIds
-        .map((id) => {
-          const person = people.find((p) => p.id === id);
-          if (person) return { type: "person" as const, person };
-          const org = graph.orgs.get(id);
-          return org ? { type: "org" as const, org } : null;
-        })
-        .filter((e) => e !== null),
-    [people, pinnedIds, graph]
-  );
+  const pinnedEntries = resolvePins(pinnedIds, people, graph.orgs);
 
   // Node array re-set on every tick so React re-renders positions; the
   // simulation object lives in a ref for the drag handlers.
@@ -377,7 +355,7 @@ export function ConnectionGraph({
     const down = bgDownRef.current;
     bgDownRef.current = null;
     if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < CLICK_SLOP) {
-      setPinnedIds([]);
+      setPinnedIds(() => []);
     }
   };
 
@@ -608,101 +586,28 @@ export function ConnectionGraph({
         </div>
       )}
       {pinnedEntries.length > 0 && (
-        // Swipeable card stack: one card per pinned node, horizontal snap
-        // scroll. Cards are slightly narrower than the track so the next
-        // pinned card peeks in from the edge.
+        // Swipeable card stack docked to the graph: one card per pinned node,
+        // horizontal snap scroll. Cards are slightly narrower than the track so
+        // the next pinned card peeks in from the edge. The desktop layout hides
+        // this and renders the same cards in its side panel instead.
         <div
           className={
             "absolute inset-x-0 bottom-0 flex snap-x snap-mandatory gap-2 overflow-x-auto px-3 scroll-px-3 [scrollbar-width:none] " +
             // A lone card centers; a stack keeps start-alignment so the
             // horizontal scroll works.
-            (pinnedEntries.length === 1 ? "justify-center" : "")
+            (pinnedEntries.length === 1 ? "justify-center " : "") +
+            (cardsClassName ?? "")
           }
         >
-          {pinnedEntries.map((entry) =>
-            entry.type === "org" ? (
-              <div
-                key={entry.org.id}
-                className="w-full shrink-0 snap-center rounded-t-2xl bg-white dark:bg-neutral-800 p-4 shadow-lg"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-base font-bold text-neutral-900 dark:text-neutral-50">{entry.org.label}</p>
-                    <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                      {entry.org.kind === "school" ? "School" : "Company"} ·{" "}
-                      {entry.org.members.length} people
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => togglePin(entry.org.id)}
-                    aria-label={`Unpin ${entry.org.label}`}
-                    className="shrink-0 rounded-full bg-neutral-100 dark:bg-neutral-700 px-2.5 py-1 text-xs text-neutral-500 dark:text-neutral-400"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <div className="mt-2 flex flex-col gap-1">
-                  {entry.org.members.map((m) => (
-                    <Link
-                      key={m.id}
-                      href={`/people/${m.id}`}
-                      className="flex items-baseline gap-2 rounded-lg px-1 py-0.5 text-sm text-neutral-900 dark:text-neutral-50 hover:bg-neutral-100"
-                    >
-                      <span className="font-medium">{m.name}</span>
-                      {m.role && <span className="truncate text-xs text-neutral-500 dark:text-neutral-400">{m.role}</span>}
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              (() => {
-                const p = entry.person;
-                return (
-            <div
-              key={p.id}
+          {pinnedEntries.map((entry) => (
+            <PinnedCard
+              key={entry.type === "org" ? entry.org.id : entry.person.id}
+              entry={entry}
+              groups={groups}
+              onUnpin={togglePin}
               className="w-full shrink-0 snap-center rounded-t-2xl bg-white dark:bg-neutral-800 p-4 shadow-lg"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="flex items-center gap-2 text-base font-bold text-neutral-900 dark:text-neutral-50">
-                    {p.name}
-                    {groupOf(p) && (
-                      <span
-                        aria-label={groupOf(p)!.name}
-                        title={groupOf(p)!.name}
-                        className="h-2.5 w-2.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: groupOf(p)!.color }}
-                      />
-                    )}
-                  </p>
-                  <p className="text-sm text-neutral-500 dark:text-neutral-400">
-                    {[p.role, p.company].filter(Boolean).join(" · ") || "No role noted"}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => togglePin(p.id)}
-                  aria-label={`Unpin ${p.name}`}
-                  className="shrink-0 rounded-full bg-neutral-100 dark:bg-neutral-700 px-2.5 py-1 text-xs text-neutral-500 dark:text-neutral-400"
-                >
-                  ✕
-                </button>
-              </div>
-              {p.met_at && <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">Met at {p.met_at}</p>}
-              <ContactChips person={p} className="mt-1.5" />
-              {p.notes && <p className="mt-2 line-clamp-3 text-sm text-neutral-700 dark:text-neutral-200">{p.notes}</p>}
-              <Link
-                href={`/people/${p.id}`}
-                className="mt-3 inline-block text-xs font-medium text-neutral-900 dark:text-neutral-50 underline underline-offset-2"
-              >
-                Full details →
-              </Link>
-            </div>
-                );
-              })()
-            )
-          )}
+            />
+          ))}
         </div>
       )}
     </div>

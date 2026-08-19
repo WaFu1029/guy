@@ -26,12 +26,17 @@ create table if not exists people (
   company text,
   school text,
   notes text,
+  -- The role the user sees this person playing for them — intro, hire,
+  -- customer, advice. Free text, entered or spoken at capture time.
+  how_they_help text,
   phone text,
   email text,
   instagram text,
   twitter text,
   raw_transcript text,
   met_at text,
+  -- How hot the lead is, 1 (cold) to 5 (hot). Null = unrated.
+  lead_heat smallint check (lead_heat between 1 and 5),
   met_date date not null default current_date,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -117,3 +122,8 @@ create policy "follow_ups owner access" on follow_ups
 --   alter table groups add column if not exists description text;
 --   alter table people add column if not exists twitter text;
 --   alter table people add column if not exists school text;
+-- Migration for databases created before "how they can help" existed:
+--   alter table people add column if not exists how_they_help text;
+-- Migration for databases created before lead heat existed:
+--   alter table people add column if not exists lead_heat smallint
+--     check (lead_heat between 1 and 5);

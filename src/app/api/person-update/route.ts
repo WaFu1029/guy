@@ -24,10 +24,22 @@ const UPDATE_PERSON_TOOL = {
       company: { type: "string", description: "Updated company, if the user corrected it." },
       school: { type: "string", description: "School or university to set, if mentioned." },
       met_at: { type: "string", description: "Updated event/place they met, if corrected." },
+      how_they_help: {
+        type: "string",
+        description:
+          "The role the user sees this person playing for them, or how they could help — an intro, a hire, a customer, funding, advice. Only when the user says it; do not invent an angle.",
+      },
       phone: { type: "string", description: "Phone number to set, verbatim." },
       email: { type: "string", description: "Email address to set, verbatim." },
       instagram: { type: "string", description: "Instagram handle to set, without the leading @." },
       twitter: { type: "string", description: "Twitter/X handle to set, without the leading @." },
+      lead_heat: {
+        type: "integer",
+        minimum: 1,
+        maximum: 5,
+        description:
+          "Updated lead heat, 1 (cold) to 5 (hot), if the user rates them ('he's a five now', 'this one's gone cold'). Omit when unstated.",
+      },
       follow_up_hours: {
         type: "number",
         description:

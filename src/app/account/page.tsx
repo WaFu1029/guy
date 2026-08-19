@@ -22,7 +22,10 @@ export default async function AccountPage() {
   ]);
 
   return (
-    <div className="mx-auto flex w-full max-w-md flex-col gap-3 px-4 pb-8 pt-2">
+    // Phone: one stacked column. Desktop: account + appearance + groups on the
+    // left, the contact book (the tallest card by far) on the right.
+    <div className="mx-auto flex w-full max-w-md flex-col gap-3 px-4 pb-8 pt-2 lg:max-w-7xl lg:grid lg:grid-cols-2 lg:items-start lg:gap-4 lg:px-7">
+      <div className="flex flex-col gap-3">
       <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-5">
         <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">Signed in as</p>
         <p className="mt-1 rounded-xl bg-white dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-50">{user.email}</p>
@@ -49,12 +52,15 @@ export default async function AccountPage() {
       </div>
 
       <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-5">
-        <p className="mb-2 text-sm font-semibold text-neutral-900 dark:text-neutral-50">Contacts</p>
-        <ContactBook people={people ?? []} groups={groups ?? []} />
+        <AccountDanger />
+      </div>
       </div>
 
-      <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-5">
-        <AccountDanger />
+      <div className="flex flex-col gap-3">
+        <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-5">
+          <p className="mb-2 text-sm font-semibold text-neutral-900 dark:text-neutral-50">Contacts</p>
+          <ContactBook people={people ?? []} groups={groups ?? []} />
+        </div>
       </div>
     </div>
   );

@@ -19,12 +19,16 @@ export type Person = {
   company: string | null;
   school: string | null;
   notes: string | null;
+  // The role the user sees them playing / how they can help.
+  how_they_help: string | null;
   phone: string | null;
   email: string | null;
   instagram: string | null;
   twitter: string | null;
   raw_transcript: string | null;
   met_at: string | null;
+  // 1 (cold) … 5 (hot); null when unrated.
+  lead_heat: number | null;
   met_date: string;
   created_at: string;
   updated_at: string;

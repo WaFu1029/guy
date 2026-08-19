@@ -11,6 +11,7 @@ export async function updatePersonFields(
   personId: string,
   fields: {
     role?: string;
+    how_they_help?: string;
     company?: string;
     school?: string;
     met_at?: string;
@@ -30,6 +31,7 @@ export async function updatePersonFields(
   const patch: Partial<Person> = {};
   for (const key of [
     "role",
+    "how_they_help",
     "company",
     "school",
     "met_at",
@@ -47,6 +49,26 @@ export async function updatePersonFields(
   if (Object.keys(patch).length === 0) return;
 
   const { error } = await supabase.from("people").update(patch).eq("id", personId);
+  if (error) throw new Error(error.message);
+}
+
+// Lead heat, 1 (cold) … 5 (hot); null clears the rating. RLS scopes the
+// update, and the check constraint rejects anything outside 1–5 — validated
+// here too so a bad value never reaches the database.
+export async function updateLeadHeat(personId: string, heat: number | null) {
+  if (heat !== null && (!Number.isInteger(heat) || heat < 1 || heat > 5)) {
+    throw new Error("Lead heat must be 1–5");
+  }
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in");
+
+  const { error } = await supabase
+    .from("people")
+    .update({ lead_heat: heat })
+    .eq("id", personId);
   if (error) throw new Error(error.message);
 }
 
@@ -88,12 +110,29 @@ export async function applyPersonUpdate(personId: string, update: PersonUpdate):
       changed.push(update.note_mode === "replace" ? "Notes replaced" : "Note added");
     }
   }
-  for (const key of ["role", "company", "school", "met_at", "phone", "email"] as const) {
+  for (const key of [
+    "role",
+    "company",
+    "school",
+    "met_at",
+    "how_they_help",
+    "phone",
+    "email",
+  ] as const) {
     const value = update[key]?.trim();
     if (value) {
       patch[key] = value;
-      changed.push(`${key.replace("_", " ")} updated`);
+      changed.push(`${key.replaceAll("_", " ")} updated`);
     }
+  }
+  if (
+    typeof update.lead_heat === "number" &&
+    Number.isInteger(update.lead_heat) &&
+    update.lead_heat >= 1 &&
+    update.lead_heat <= 5
+  ) {
+    patch.lead_heat = update.lead_heat;
+    changed.push("lead heat updated");
   }
   if (update.instagram?.trim()) {
     patch.instagram = update.instagram.trim().replace(/^@/, "");

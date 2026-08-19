@@ -7,6 +7,7 @@ import type { Person } from "@/types/database";
 
 type Editable = {
   role: string;
+  how_they_help: string;
   company: string;
   school: string;
   met_at: string;
@@ -19,6 +20,7 @@ type Editable = {
 
 const ROWS: { key: keyof Editable; label: string }[] = [
   { key: "role", label: "Role" },
+  { key: "how_they_help", label: "How they can help" },
   { key: "company", label: "Company" },
   { key: "school", label: "School" },
   { key: "met_at", label: "Met because" },
@@ -33,6 +35,7 @@ export function ProfileFields({ person }: { person: Person }) {
   const router = useRouter();
   const initial: Editable = {
     role: person.role ?? "",
+    how_they_help: person.how_they_help ?? "",
     company: person.company ?? "",
     school: person.school ?? "",
     met_at: person.met_at ?? "",
