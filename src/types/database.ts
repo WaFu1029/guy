@@ -51,6 +51,8 @@ export type VocabTerm = {
   user_id: string;
   term: string;
   hint: string | null;
+  // Mistranscriptions captured from the user's own voice.
+  aliases: string[];
   created_at: string;
 };
 

@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { personContextLine } from "@/lib/personContext";
+import { vocabLine } from "@/lib/vocab";
 import { LogForm } from "@/components/LogForm";
 
 export default async function LogPage() {
@@ -10,7 +11,10 @@ export default async function LogPage() {
       .from("people")
       .select("name, role, company, notes")
       .order("name", { ascending: true }),
-    supabase.from("vocab_terms").select("term, hint").order("created_at", { ascending: true }),
+    supabase
+      .from("vocab_terms")
+      .select("term, hint, aliases")
+      .order("created_at", { ascending: true }),
   ]);
 
   return (
@@ -23,9 +27,7 @@ export default async function LogPage() {
           role: p.role,
           company: p.company,
         }))}
-        vocabulary={(vocab ?? []).map((v) =>
-          v.hint ? `${v.term} (${v.hint})` : v.term
-        )}
+        vocabulary={(vocab ?? []).map(vocabLine)}
       />
     </div>
   );

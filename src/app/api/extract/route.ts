@@ -136,7 +136,7 @@ export async function POST(request: Request) {
   }
   if (Array.isArray(vocabulary) && vocabulary.length > 0) {
     contextParts.push(
-      `The user's vocabulary — names and terms they say often, spelled the way they want them:\n${vocabulary.join("\n")}\n\nSpeech recognition mangles unusual names: "Bangle" comes back as "bungle", "bongle", or "Bangalore"; "Po-Shen Loh" as "Poshen Low" or "post and low". When a word or phrase in the transcript is phonetically close to one of these, it IS that term — use this spelling exactly, in whichever field it belongs to. Judge by sound, not spelling. Never force an unrelated word onto a vocabulary term, and never introduce a term the transcript doesn't sound like.`
+      `The user's vocabulary — names and terms they say often, spelled the way they want them:\n${vocabulary.join("\n")}\n\nSpeech recognition mangles unusual names: "Bangle" comes back as "bungle", "bongle", or "Bangalore"; "Po-Shen Loh" as "Poshen Low" or "post and low". A "commonly transcribed as" list is what this user's recognizer actually produced when they recorded that term — treat those strings as certain matches wherever they appear. Beyond those, when a word or phrase in the transcript is phonetically close to one of these terms, it IS that term — use this spelling exactly, in whichever field it belongs to. Judge by sound, not spelling. Never force an unrelated word onto a vocabulary term, and never introduce a term the transcript doesn't sound like.`
     );
   }
   if (Array.isArray(groups) && groups.length > 0) {

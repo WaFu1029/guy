@@ -5,6 +5,7 @@ import { FollowUpActions } from "@/components/FollowUpActions";
 import { ProfileVoiceEdit } from "@/components/ProfileVoiceEdit";
 import { ContactChips } from "@/components/ContactChips";
 import { personContextLine } from "@/lib/personContext";
+import { vocabLine } from "@/lib/vocab";
 import { DeletePersonButton } from "@/components/DeletePersonButton";
 import { ProfileFields } from "@/components/ProfileFields";
 import { LeadHeatPicker } from "@/components/LeadHeatPicker";
@@ -34,7 +35,10 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
       .order("due_at", { ascending: false }),
     supabase.from("groups").select("name"),
     supabase.from("people").select("name, role, company, notes"),
-    supabase.from("vocab_terms").select("term, hint").order("created_at", { ascending: true }),
+    supabase
+      .from("vocab_terms")
+      .select("term, hint, aliases")
+      .order("created_at", { ascending: true }),
   ]);
 
   return (
@@ -62,7 +66,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
             currentNotes={person.notes ?? ""}
             groupNames={(groups ?? []).map((g) => g.name)}
             peopleNames={(allPeople ?? []).map(personContextLine)}
-            vocabulary={(vocab ?? []).map((v) => (v.hint ? `${v.term} (${v.hint})` : v.term))}
+            vocabulary={(vocab ?? []).map(vocabLine)}
           />
         </div>
       </div>

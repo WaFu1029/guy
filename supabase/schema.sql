@@ -67,6 +67,10 @@ create table if not exists vocab_terms (
   term text not null,
   -- Optional disambiguator, e.g. "sounds like BANG-gul".
   hint text,
+  -- What speech recognition actually turns this term into on the user's
+  -- voice and mic ("bungle", "Bangalore"). Captured by recording the term
+  -- a few times; a far stronger signal than a phonetic hint.
+  aliases text[] not null default (array[]::text[]),
   created_at timestamptz not null default now()
 );
 
@@ -174,3 +178,6 @@ create policy "follow_ups owner access" on follow_ups
 --   (run the vocab_terms create table + index + RLS block above)
 -- Migration for databases created before the user's own profile existed:
 --   (run the profiles create table + RLS + updated_at trigger blocks above)
+-- Migration for vocabularies created before recorded aliases existed:
+--   alter table vocab_terms add column if not exists aliases text[]
+--     not null default (array[]::text[]);
