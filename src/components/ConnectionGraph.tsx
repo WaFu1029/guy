@@ -55,6 +55,45 @@ const CHARGE_DEFAULT = 220;
 const CENTER_DEFAULT = 1;
 
 type ForceParams = { linkDist: number; charge: number; center: number };
+
+const FORCE_DEFAULTS: ForceParams = {
+  linkDist: LINK_DIST_DEFAULT,
+  charge: CHARGE_DEFAULT,
+  center: CENTER_DEFAULT,
+};
+
+// Slider bounds, shared by the inputs and by the stored-value validation.
+const FORCE_RANGE: Record<keyof ForceParams, [number, number]> = {
+  linkDist: [40, 220],
+  charge: [50, 500],
+  center: [0, 1],
+};
+
+// The sliders persist per device, like the theme — a layout you've tuned
+// shouldn't reset every time the page reloads.
+const FORCE_STORAGE_KEY = "guy-forces";
+
+function readStoredForces(): ForceParams {
+  if (typeof window === "undefined") return FORCE_DEFAULTS;
+  try {
+    const raw = window.localStorage.getItem(FORCE_STORAGE_KEY);
+    if (!raw) return FORCE_DEFAULTS;
+    const parsed = JSON.parse(raw) as Partial<ForceParams>;
+    const next = { ...FORCE_DEFAULTS };
+    for (const key of ["linkDist", "charge", "center"] as const) {
+      const value = parsed[key];
+      const [min, max] = FORCE_RANGE[key];
+      // Anything out of range or non-numeric falls back to the default rather
+      // than handing the simulation a value that wedges the layout.
+      if (typeof value === "number" && Number.isFinite(value) && value >= min && value <= max) {
+        next[key] = value;
+      }
+    }
+    return next;
+  } catch {
+    return FORCE_DEFAULTS;
+  }
+}
 const ZOOM_EXTENT: [number, number] = [0.25, 6];
 // Pointer-up within this many screen px of pointer-down is a tap, not a drag.
 const CLICK_SLOP = 8;
@@ -101,15 +140,18 @@ export function ConnectionGraph({
   // current values without depending on them — slider changes mutate the live
   // forces instead of rebuilding the simulation.
   const [showForces, setShowForces] = useState(false);
-  const [forceParams, setForceParams] = useState<ForceParams>({
-    linkDist: LINK_DIST_DEFAULT,
-    charge: CHARGE_DEFAULT,
-    center: CENTER_DEFAULT,
-  });
+  // Lazy init: the panel is closed on first paint, so reading storage during
+  // the initial client render can't diverge from the server's markup.
+  const [forceParams, setForceParams] = useState<ForceParams>(readStoredForces);
   const forceParamsRef = useRef(forceParams);
   const applyForceParams = (next: ForceParams) => {
     setForceParams(next);
     forceParamsRef.current = next;
+    try {
+      window.localStorage.setItem(FORCE_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // Private mode or a full quota — the sliders still work for this session.
+    }
     const sim = simRef.current;
     if (!sim) return;
     (sim.force("link") as ForceLink<SimNode, SimLink> | null)?.distance(next.linkDist);
@@ -529,9 +571,9 @@ export function ConnectionGraph({
           <div className="w-52 rounded-xl bg-white/90 dark:bg-neutral-800/90 p-3 backdrop-blur">
             {(
               [
-                ["Link distance", "linkDist", 40, 220, 1],
-                ["Repulsion", "charge", 50, 500, 5],
-                ["Center pull", "center", 0, 1, 0.05],
+                ["Link distance", "linkDist", ...FORCE_RANGE.linkDist, 1],
+                ["Repulsion", "charge", ...FORCE_RANGE.charge, 5],
+                ["Center pull", "center", ...FORCE_RANGE.center, 0.05],
               ] as const
             ).map(([label, key, min, max, step]) => (
               <label
@@ -551,6 +593,13 @@ export function ConnectionGraph({
                 />
               </label>
             ))}
+            <button
+              type="button"
+              onClick={() => applyForceParams(FORCE_DEFAULTS)}
+              className="text-[11px] text-neutral-500 dark:text-neutral-400 underline underline-offset-2"
+            >
+              Reset forces
+            </button>
           </div>
         )}
       </div>
