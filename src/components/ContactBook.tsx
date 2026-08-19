@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { deletePerson } from "@/app/account/actions";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import type { Group, Person } from "@/types/database";
 
 // Phone-book style contact list for the Account tab: search across name,
@@ -13,7 +14,23 @@ export function ContactBook({ people, groups }: { people: Person[]; groups: Grou
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  // The person a delete has been asked about, held until they confirm.
+  const [pending, setPending] = useState<Person | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const remove = async (person: Person) => {
+    setBusyId(person.id);
+    setError(null);
+    try {
+      await deletePerson(person.id);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete");
+    } finally {
+      setBusyId(null);
+      setPending(null);
+    }
+  };
   const groupById = useMemo(() => new Map(groups.map((g) => [g.id, g])), [groups]);
 
   const filtered = useMemo(() => {
@@ -64,21 +81,7 @@ export function ContactBook({ people, groups }: { people: Person[]; groups: Grou
             <button
               type="button"
               disabled={busyId === p.id}
-              onClick={async () => {
-                if (!window.confirm(`Delete ${p.name}? Their connections and reminders go too.`)) {
-                  return;
-                }
-                setBusyId(p.id);
-                setError(null);
-                try {
-                  await deletePerson(p.id);
-                  router.refresh();
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : "Failed to delete");
-                } finally {
-                  setBusyId(null);
-                }
-              }}
+              onClick={() => setPending(p)}
               className="shrink-0 rounded-full bg-neutral-100 dark:bg-neutral-700 px-2.5 py-1 text-xs text-neutral-500 dark:text-neutral-400 disabled:opacity-40"
             >
               Delete
@@ -87,6 +90,14 @@ export function ContactBook({ people, groups }: { people: Person[]; groups: Grou
         );
       })}
       {error && <p className="text-sm text-red-600">{error}</p>}
+      <ConfirmDialog
+        open={pending !== null}
+        busy={busyId !== null}
+        title={pending ? `Delete ${pending.name}?` : ""}
+        body="Their connections and reminders go too."
+        onConfirm={() => pending && remove(pending)}
+        onCancel={() => setPending(null)}
+      />
     </div>
   );
 }
