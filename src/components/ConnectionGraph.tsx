@@ -349,6 +349,8 @@ export function ConnectionGraph({
   // Edge crossings left after the last untangle — surfaced in the Forces panel,
   // since it's the number that tracks how tangled the picture actually looks.
   const [crossings, setCrossings] = useState<number | null>(null);
+  // Bumped to force a rebuild after the saved layout is thrown away.
+  const [layoutEpoch, setLayoutEpoch] = useState(0);
 
   const [zoomTransform, setZoomTransform] = useState<ZoomTransform>(zoomIdentity);
   const zoomTransformRef = useRef<ZoomTransform>(zoomIdentity);
@@ -410,27 +412,55 @@ export function ConnectionGraph({
       }
     }
 
-    // The forces optimize distance, not readability. Once they cool, swap
-    // nodes between the positions they settled into wherever that removes
-    // edge crossings, and slide into the result so it reads as the layout
-    // tidying itself rather than teleporting.
-    const settle = () => {
-      if (dragIdRef.current) return;
+    // One force configuration, used by the on-screen simulation and by the
+    // off-screen retry below, so the two are judged on equal terms.
+    const configure = (list: SimNode[], edges: SimLink[]) =>
+      forceSimulation<SimNode>(list)
+        .force(
+          "link",
+          forceLink<SimNode, SimLink & { index?: number }>(
+            edges as (SimLink & { index?: number })[]
+          )
+            .id((d) => d.id)
+            .distance(forceParamsRef.current.linkDist)
+        )
+        .force("charge", forceManyBody<SimNode>().strength(-forceParamsRef.current.charge))
+        // Hard minimum spacing. Charge alone settles into overlaps because it
+        // falls off with distance — collision is what actually keeps two nodes
+        // (and their labels) off each other.
+        .force(
+          "collide",
+          forceCollide<SimNode>()
+            .radius((d) => NODE_RADIUS[d.kind] + LABEL_SPACE)
+            .strength(0.9)
+            .iterations(2)
+        )
+        .force(
+          "center",
+          forceCenter<SimNode>(viewW / 2, viewH / 2).strength(forceParamsRef.current.center)
+        )
+        // A weak pull on each axis. forceCenter only translates the whole
+        // layout, so it can't reel in a node the repulsion has flung wide —
+        // these keep the graph filling the frame instead of drifting off it.
+        .force("x", forceX<SimNode>(viewW / 2).strength(0.04))
+        .force("y", forceY<SimNode>(viewH / 2).strength(0.04));
+
+    const tidy = (list: SimNode[], edges: SimLink[]) => {
       // Relocation is bounded by the layout the forces produced, so a node
       // can be slid into a gap but never flung outside the picture.
-      const xsAll = nodes.map((n) => n.x ?? 0);
-      const ysAll = nodes.map((n) => n.y ?? 0);
-      const result = untangle(
-        nodes.map((n) => ({
+      const xsAll = list.map((n) => n.x ?? 0);
+      const ysAll = list.map((n) => n.y ?? 0);
+      return untangle(
+        list.map((n) => ({
           id: n.id,
           x: n.x,
           y: n.y,
           fixed: n.kind === "you",
           radius: NODE_RADIUS[n.kind] + LABEL_SPACE,
         })),
-        links.map((l) => ({
-          source: (l.source as SimNode).id,
-          target: (l.target as SimNode).id,
+        edges.map((l) => ({
+          source: typeof l.source === "string" ? l.source : l.source.id,
+          target: typeof l.target === "string" ? l.target : l.target.id,
         })),
         {
           minX: Math.min(...xsAll),
@@ -439,17 +469,77 @@ export function ConnectionGraph({
           maxY: Math.max(...ysAll),
         }
       );
-      setCrossings(result.after);
-      if (result.positions.size === 0) return;
+    };
+
+    // The fallback the warm start earns the right to: lay the same graph out
+    // from scratch off-screen, tidy that too, and keep it only if it reads
+    // better. Resuming a known-good arrangement is almost always the better
+    // starting point, but one added person can wedge it — this is the escape.
+    const fromScratch = () => {
+      const list: SimNode[] = graph.nodes.map((n) => ({ ...n }));
+      const edges: SimLink[] = graph.links.map((l) => ({ ...l }));
+      anchorYou(list);
+      const sim = configure(list, edges).stop();
+      for (let i = 0; i < COLD_TICKS; i++) sim.tick();
+      const result = tidy(list, edges);
+      const positions = new Map<string, { x: number; y: number }>();
+      for (const n of list) {
+        const moved = result.positions.get(n.id);
+        positions.set(n.id, moved ?? { x: n.x ?? 0, y: n.y ?? 0 });
+      }
+      return { positions, crossings: result.after };
+    };
+
+    // The forces optimize distance, not readability. Once they cool, tidy the
+    // arrangement, decide whether it beats a fresh attempt, save the winner,
+    // and slide into it so it reads as the layout tidying itself rather than
+    // teleporting.
+    const settle = () => {
+      if (dragIdRef.current) return;
+      const result = tidy(nodes, links);
+      const targets = new Map<string, { x: number; y: number }>();
+      for (const n of nodes) {
+        targets.set(n.id, result.positions.get(n.id) ?? { x: n.x ?? 0, y: n.y ?? 0 });
+      }
+      let crossingCount = result.after;
+
+      // Worth retrying when the resumed layout is being asked to hold people it
+      // was never arranged for, or when it has since been made worse (a drag
+      // that tangled things). A graph laid out from scratch has nothing to
+      // retry, so it is left alone.
+      const peopleChanged = saved?.signature !== signature;
+      const worseThanSaved = !peopleChanged && !!saved && crossingCount > saved.crossings;
+      if (restored > 0 && (peopleChanged || worseThanSaved)) {
+        const cold = fromScratch();
+        if (cold.crossings < crossingCount) {
+          for (const [id, at] of cold.positions) targets.set(id, at);
+          crossingCount = cold.crossings;
+        }
+      }
+
+      setCrossings(crossingCount);
+      writeStoredLayout({
+        signature,
+        crossings: crossingCount,
+        positions: Object.fromEntries(
+          [...targets].map(([id, at]) => [id, [at.x, at.y] as [number, number]])
+        ),
+      });
+
       const from = new Map(nodes.map((n) => [n.id, { x: n.x ?? 0, y: n.y ?? 0 }]));
+      const moving = nodes.some((n) => {
+        const to = targets.get(n.id);
+        return !!to && (to.x !== n.x || to.y !== n.y);
+      });
+      if (!moving) return;
       const startedAt = performance.now();
       const step = (now: number) => {
-        // A drag mid-slide wins; the next settle will untangle again.
+        // A drag mid-slide wins; the next settle will tidy again.
         if (dragIdRef.current) return;
         const t = Math.min(1, (now - startedAt) / UNTANGLE_MS);
         const eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
         for (const n of nodes) {
-          const to = result.positions.get(n.id);
+          const to = targets.get(n.id);
           const start = from.get(n.id);
           if (!to || !start) continue;
           n.x = start.x + (to.x - start.x) * eased;
@@ -467,40 +557,16 @@ export function ConnectionGraph({
 
     settleRef.current = settle;
 
-    const sim = forceSimulation<SimNode>(nodes)
-      .force(
-        "link",
-        forceLink<SimNode, SimLink & { index?: number }>(
-          links as (SimLink & { index?: number })[]
-        )
-          .id((d) => d.id)
-          .distance(forceParamsRef.current.linkDist)
-      )
-      .force("charge", forceManyBody<SimNode>().strength(-forceParamsRef.current.charge))
-      // Hard minimum spacing. Charge alone settles into overlaps because it
-      // falls off with distance — collision is what actually keeps two nodes
-      // (and their labels) off each other.
-      .force(
-        "collide",
-        forceCollide<SimNode>()
-          .radius((d) => NODE_RADIUS[d.kind] + LABEL_SPACE)
-          .strength(0.9)
-          .iterations(2)
-      )
-      .force(
-        "center",
-        forceCenter<SimNode>(viewW / 2, viewH / 2).strength(forceParamsRef.current.center)
-      )
-      // A weak pull on each axis. forceCenter only translates the whole
-      // layout, so it can't reel in a node the repulsion has flung wide —
-      // these keep the graph filling the frame instead of drifting off it.
-      .force("x", forceX<SimNode>(viewW / 2).strength(0.04))
-      .force("y", forceY<SimNode>(viewH / 2).strength(0.04))
+    const sim = configure(nodes, links)
       .on("tick", () => {
         setSimNodes([...nodes]);
         setSimLinks([...links]);
       })
       .on("end", settle);
+    // Resuming a saved layout means the arrangement is already close to right,
+    // so the simulation starts cool: enough energy to fit a newcomer in, not
+    // enough to shuffle everyone who was already placed.
+    if (restored > 0) sim.alpha(0.45);
     simRef.current = sim;
     return () => {
       cancelAnimationFrame(tweenRef.current);
@@ -508,7 +574,7 @@ export function ConnectionGraph({
       simRef.current = null;
       settleRef.current = null;
     };
-  }, [graph]);
+  }, [graph, layoutEpoch]);
 
   // Bind d3-zoom to the SVG: wheel/pinch zooms anywhere, drag pans only when
   // the gesture starts on empty background — pointer-downs on a node circle
@@ -848,6 +914,20 @@ export function ConnectionGraph({
                 Tidy
               </button>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  window.localStorage.removeItem(LAYOUT_STORAGE_KEY);
+                } catch {
+                  // Nothing saved to drop.
+                }
+                setLayoutEpoch((v) => v + 1);
+              }}
+              className="mt-1 text-[11px] text-neutral-500 dark:text-neutral-400 underline underline-offset-2"
+            >
+              Rebuild layout
+            </button>
             {crossings !== null && (
               <p className="mt-1.5 text-[11px] text-neutral-500 dark:text-neutral-400">
                 {crossings} edge crossing{crossings === 1 ? "" : "s"}
