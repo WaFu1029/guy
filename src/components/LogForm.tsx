@@ -102,6 +102,12 @@ export function LogForm({
   // Fields the user edited by hand mid-recording. Live extraction leaves those
   // alone, so a typed correction can't be overwritten by a later interim pass.
   const manualEditsRef = useRef<Set<keyof Fields>>(new Set());
+  // Notes as they stood when the current recording started. Every extraction
+  // pass rebuilds the field from this snapshot rather than appending to its
+  // own previous output — otherwise each interim pass restates the growing
+  // draft in slightly different words, the duplicate check misses, and the
+  // field fills up with near-copies of the same sentences.
+  const baseNotesRef = useRef("");
   // Same idea for the chip choices, which aren't text fields.
   const manualChoicesRef = useRef<Set<"group" | "leadHeat" | "followUp">>(new Set());
   const chose = (choice: "group" | "leadHeat" | "followUp") => {
@@ -136,7 +142,12 @@ export function LogForm({
     if (roleRef.current.trim()) draft.role = roleRef.current.trim();
     if (cur.company.trim()) draft.company = cur.company.trim();
     if (cur.school.trim()) draft.school = cur.school.trim();
-    if (cur.whatTheyDo.trim()) draft.notes = cur.whatTheyDo.trim();
+    // While a recording is in flight the live value is this session's own
+    // extraction — showing it back to the model invites a restatement.
+    const inSession =
+      statusRef.current === "recording" || statusRef.current === "processing";
+    const notesForDraft = inSession ? baseNotesRef.current : cur.whatTheyDo;
+    if (notesForDraft.trim()) draft.notes = notesForDraft.trim();
     if (cur.howTheyHelp.trim()) draft.how_they_help = cur.howTheyHelp.trim();
     if (cur.event.trim()) draft.met_because = cur.event.trim();
     return draft;
@@ -184,17 +195,16 @@ export function LogForm({
         }
         return merged.join(", ");
       };
-      let appended = pick("whatTheyDo", extracted.context);
-      const curNotes = cur.whatTheyDo.trim();
+      // Notes = whatever was there before this recording + what this
+      // recording has said so far. Recomputed from the snapshot on every
+      // pass, so passes replace each other instead of stacking up.
+      const base = baseNotesRef.current.trim();
       const nextNotes = extracted.context?.trim() ?? "";
-      if (!keep("whatTheyDo") && curNotes && nextNotes && !curNotes.includes(nextNotes)) {
-        // If the model restated the draft with new text tacked on, keep only
-        // the new tail; otherwise append.
-        const tail = nextNotes.startsWith(curNotes)
-          ? nextNotes.slice(curNotes.length).replace(/^[\s.,;—-]+/, "")
-          : nextNotes;
-        appended = tail ? `${curNotes}\n${tail}` : curNotes;
-      }
+      let appended: string;
+      if (keep("whatTheyDo") || !nextNotes) appended = cur.whatTheyDo;
+      else if (!base) appended = nextNotes;
+      else if (nextNotes.includes(base)) appended = nextNotes;
+      else appended = `${base}\n${nextNotes}`;
       return {
         name: pick("name", extracted.name),
         alsoKnows: keep("alsoKnows")
@@ -350,6 +360,7 @@ export function LogForm({
 
     transcriptRef.current = "";
     liveSentRef.current = "";
+    baseNotesRef.current = fieldsRef.current.whatTheyDo;
     manualEditsRef.current = new Set();
     manualChoicesRef.current = new Set();
     setLiveTranscript("");
