@@ -44,6 +44,20 @@ create table if not exists people (
 
 create index if not exists people_user_id_idx on people(user_id);
 
+-- Names and terms the user says often, spelled the way they want them.
+-- Speech recognition mangles unusual names ("Bangle" -> "bungle"), so these
+-- are handed to the extractor as the canonical spellings to snap to.
+create table if not exists vocab_terms (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  term text not null,
+  -- Optional disambiguator, e.g. "sounds like BANG-gul".
+  hint text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists vocab_terms_user_id_idx on vocab_terms(user_id);
+
 -- Relationships between people (or between the user and a person, when
 -- from_person_id is null). Each row is a graph edge.
 create table if not exists connections (
@@ -94,6 +108,7 @@ alter table groups enable row level security;
 alter table people enable row level security;
 alter table connections enable row level security;
 alter table follow_ups enable row level security;
+alter table vocab_terms enable row level security;
 
 drop policy if exists "groups owner access" on groups;
 create policy "groups owner access" on groups
@@ -105,6 +120,10 @@ create policy "people owner access" on people
 
 drop policy if exists "connections owner access" on connections;
 create policy "connections owner access" on connections
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "vocab_terms owner access" on vocab_terms;
+create policy "vocab_terms owner access" on vocab_terms
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 drop policy if exists "follow_ups owner access" on follow_ups;
@@ -127,3 +146,5 @@ create policy "follow_ups owner access" on follow_ups
 -- Migration for databases created before lead heat existed:
 --   alter table people add column if not exists lead_heat smallint
 --     check (lead_heat between 1 and 5);
+-- Migration for databases created before the vocabulary existed:
+--   (run the vocab_terms create table + index + RLS block above)

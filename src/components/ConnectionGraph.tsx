@@ -3,9 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   forceCenter,
+  forceCollide,
   forceLink,
   forceManyBody,
   forceSimulation,
+  forceX,
+  forceY,
   type ForceCenter,
   type ForceLink,
   type ForceManyBody,
@@ -50,9 +53,14 @@ type SimLink = {
 const NODE_RADIUS: Record<SimNode["kind"], number> = { you: 26, person: 20, org: 16 };
 
 // Force defaults (charge applied as a negative, repulsive strength).
-const LINK_DIST_DEFAULT = 110;
-const CHARGE_DEFAULT = 220;
+const LINK_DIST_DEFAULT = 135;
+const CHARGE_DEFAULT = 340;
 const CENTER_DEFAULT = 1;
+
+// Every node also claims the space its labels occupy — name sits ~14px below
+// the circle, the role line ~26px — so collision keeps text from colliding
+// too, not just the circles.
+const LABEL_SPACE = 30;
 
 type ForceParams = { linkDist: number; charge: number; center: number };
 
@@ -278,10 +286,25 @@ export function ConnectionGraph({
           .distance(forceParamsRef.current.linkDist)
       )
       .force("charge", forceManyBody<SimNode>().strength(-forceParamsRef.current.charge))
+      // Hard minimum spacing. Charge alone settles into overlaps because it
+      // falls off with distance — collision is what actually keeps two nodes
+      // (and their labels) off each other.
+      .force(
+        "collide",
+        forceCollide<SimNode>()
+          .radius((d) => NODE_RADIUS[d.kind] + LABEL_SPACE)
+          .strength(0.9)
+          .iterations(2)
+      )
       .force(
         "center",
         forceCenter<SimNode>(viewW / 2, viewH / 2).strength(forceParamsRef.current.center)
       )
+      // A weak pull on each axis. forceCenter only translates the whole
+      // layout, so it can't reel in a node the repulsion has flung wide —
+      // these keep the graph filling the frame instead of drifting off it.
+      .force("x", forceX<SimNode>(viewW / 2).strength(0.04))
+      .force("y", forceY<SimNode>(viewH / 2).strength(0.04))
       .on("tick", () => {
         setSimNodes([...nodes]);
         setSimLinks([...links]);

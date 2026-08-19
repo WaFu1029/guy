@@ -34,6 +34,14 @@ export type Person = {
   updated_at: string;
 };
 
+export type VocabTerm = {
+  id: string;
+  user_id: string;
+  term: string;
+  hint: string | null;
+  created_at: string;
+};
+
 export type Connection = {
   id: string;
   user_id: string;
@@ -67,6 +75,12 @@ export type Database = {
         Row: Person;
         Insert: Partial<Person> & { user_id: string; name: string };
         Update: Partial<Person>;
+        Relationships: [];
+      };
+      vocab_terms: {
+        Row: VocabTerm;
+        Insert: Partial<VocabTerm> & { user_id: string; term: string };
+        Update: Partial<VocabTerm>;
         Relationships: [];
       };
       connections: {

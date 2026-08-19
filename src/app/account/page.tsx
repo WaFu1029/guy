@@ -3,6 +3,7 @@ import { GroupManager } from "@/components/GroupManager";
 import { ContactBook } from "@/components/ContactBook";
 import { AccountDanger } from "@/components/AccountDanger";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { VocabManager } from "@/components/VocabManager";
 
 export default async function AccountPage() {
   const supabase = await createClient();
@@ -12,13 +13,15 @@ export default async function AccountPage() {
 
   if (!user) return null;
 
-  const [{ data: people }, { data: groups }, { count: pendingCount }] = await Promise.all([
+  const [{ data: people }, { data: groups }, { count: pendingCount }, { data: vocab }] =
+    await Promise.all([
     supabase.from("people").select("*").order("name", { ascending: true }),
     supabase.from("groups").select("*").order("created_at", { ascending: true }),
     supabase
       .from("follow_ups")
       .select("*", { count: "exact", head: true })
       .eq("status", "pending"),
+    supabase.from("vocab_terms").select("*").order("created_at", { ascending: true }),
   ]);
 
   return (
@@ -49,6 +52,13 @@ export default async function AccountPage() {
       <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-5">
         <p className="mb-2 text-sm font-semibold text-neutral-900 dark:text-neutral-50">Groups</p>
         <GroupManager groups={groups ?? []} />
+      </div>
+
+      <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-5">
+        <p className="mb-2 text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+          Voice vocabulary
+        </p>
+        <VocabManager terms={vocab ?? []} />
       </div>
 
       <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-5">

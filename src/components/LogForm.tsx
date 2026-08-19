@@ -67,12 +67,16 @@ export function LogForm({
   groups: initialGroups,
   peopleContext = [],
   networkPeople = [],
+  vocabulary = [],
 }: {
   groups: Group[];
   // One summary line per existing contact (name — role · company — notes…).
   peopleContext?: string[];
   // Existing contacts, for the name autocomplete on the person fields.
   networkPeople?: SuggestPerson[];
+  // The user's spoken-word canon — spellings the extractor snaps near-misses
+  // onto, for names the transcriber reliably mangles.
+  vocabulary?: string[];
 }) {
   const router = useRouter();
   // Local copy so an inline-created group is selectable immediately.
@@ -166,6 +170,7 @@ export function LogForm({
         draft: buildDraft(),
         groups: groups.map((g) => g.name),
         people: peopleContext,
+        vocabulary,
         interim: opts.interim,
       }),
     });

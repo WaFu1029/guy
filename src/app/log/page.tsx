@@ -4,12 +4,13 @@ import { LogForm } from "@/components/LogForm";
 
 export default async function LogPage() {
   const supabase = await createClient();
-  const [{ data: groups }, { data: people }] = await Promise.all([
+  const [{ data: groups }, { data: people }, { data: vocab }] = await Promise.all([
     supabase.from("groups").select("*").order("created_at", { ascending: true }),
     supabase
       .from("people")
       .select("name, role, company, notes")
       .order("name", { ascending: true }),
+    supabase.from("vocab_terms").select("term, hint").order("created_at", { ascending: true }),
   ]);
 
   return (
@@ -22,6 +23,9 @@ export default async function LogPage() {
           role: p.role,
           company: p.company,
         }))}
+        vocabulary={(vocab ?? []).map((v) =>
+          v.hint ? `${v.term} (${v.hint})` : v.term
+        )}
       />
     </div>
   );

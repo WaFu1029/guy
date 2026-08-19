@@ -116,7 +116,7 @@ const RECORD_CONNECTION_TOOL = {
 };
 
 export async function POST(request: Request) {
-  const { transcript, draft, groups, people, interim } = await request.json();
+  const { transcript, draft, groups, people, vocabulary, interim } = await request.json();
   // Interim passes run repeatedly while the user is still talking, so they use
   // the fast model and tolerate a half-finished sentence; the final pass on
   // stop still runs on Opus.
@@ -134,12 +134,17 @@ export async function POST(request: Request) {
       `The user already has a partially filled draft for this person (they may be adding to or correcting it — resolve pronouns like "he"/"her" to this person, and repeat the draft's name as the name if the transcript doesn't restate it):\n${JSON.stringify(draft)}`
     );
   }
+  if (Array.isArray(vocabulary) && vocabulary.length > 0) {
+    contextParts.push(
+      `The user's vocabulary — names and terms they say often, spelled the way they want them:\n${vocabulary.join("\n")}\n\nSpeech recognition mangles unusual names: "Bangle" comes back as "bungle", "bongle", or "Bangalore"; "Po-Shen Loh" as "Poshen Low" or "post and low". When a word or phrase in the transcript is phonetically close to one of these, it IS that term — use this spelling exactly, in whichever field it belongs to. Judge by sound, not spelling. Never force an unrelated word onto a vocabulary term, and never introduce a term the transcript doesn't sound like.`
+    );
+  }
   if (Array.isArray(groups) && groups.length > 0) {
     contextParts.push(`The user's existing groups: ${groups.join(", ")}`);
   }
   if (Array.isArray(people) && people.length > 0) {
     contextParts.push(
-      `The user's existing contacts, one per line as "Name — role · company — notes". When a mention matches one — by name OR by a relationship/description reference like "my mom", "my roommate", "the Stripe PM" that matches a summary — use that contact's exact name:\n${people.join("\n")}`
+      `The user's existing contacts, one per line as "Name — role · company — notes". When a mention matches one — by name, by a phonetically close mangling of the name (speech recognition garbles unusual names), OR by a relationship/description reference like "my mom", "my roommate", "the Stripe PM" that matches a summary — use that contact's exact name:\n${people.join("\n")}`
     );
   }
 

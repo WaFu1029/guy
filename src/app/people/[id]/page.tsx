@@ -16,8 +16,13 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   const { data: person } = await supabase.from("people").select("*").eq("id", id).single();
   if (!person) notFound();
 
-  const [{ data: connections }, { data: followUps }, { data: groups }, { data: allPeople }] =
-    await Promise.all([
+  const [
+    { data: connections },
+    { data: followUps },
+    { data: groups },
+    { data: allPeople },
+    { data: vocab },
+  ] = await Promise.all([
     supabase
       .from("connections")
       .select("*, from:from_person_id(name), to:to_person_id(name)")
@@ -29,6 +34,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
       .order("due_at", { ascending: false }),
     supabase.from("groups").select("name"),
     supabase.from("people").select("name, role, company, notes"),
+    supabase.from("vocab_terms").select("term, hint").order("created_at", { ascending: true }),
   ]);
 
   return (
@@ -53,6 +59,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
             currentNotes={person.notes ?? ""}
             groupNames={(groups ?? []).map((g) => g.name)}
             peopleNames={(allPeople ?? []).map(personContextLine)}
+            vocabulary={(vocab ?? []).map((v) => (v.hint ? `${v.term} (${v.hint})` : v.term))}
           />
         </div>
 

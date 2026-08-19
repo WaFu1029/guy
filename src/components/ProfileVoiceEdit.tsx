@@ -16,12 +16,15 @@ export function ProfileVoiceEdit({
   currentNotes = "",
   groupNames = [],
   peopleNames = [],
+  vocabulary = [],
 }: {
   personId: string;
   personName: string;
   currentNotes?: string;
   groupNames?: string[];
   peopleNames?: string[];
+  // Spellings the extractor snaps near-misses onto — see the account page.
+  vocabulary?: string[];
 }) {
   const router = useRouter();
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
@@ -88,6 +91,7 @@ export function ProfileVoiceEdit({
           currentNotes,
           groups: groupNames,
           people: peopleNames,
+          vocabulary,
         }),
       });
       if (!res.ok) {

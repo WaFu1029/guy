@@ -81,7 +81,8 @@ const UPDATE_PERSON_TOOL = {
 };
 
 export async function POST(request: Request) {
-  const { transcript, personName, currentNotes, groups, people } = await request.json();
+  const { transcript, personName, currentNotes, groups, people, vocabulary } =
+    await request.json();
 
   if (!transcript || typeof transcript !== "string") {
     return NextResponse.json({ error: "transcript is required" }, { status: 400 });
@@ -95,6 +96,11 @@ export async function POST(request: Request) {
   }
   if (Array.isArray(groups) && groups.length > 0) {
     contextParts.push(`The user's existing groups: ${groups.join(", ")}`);
+  }
+  if (Array.isArray(vocabulary) && vocabulary.length > 0) {
+    contextParts.push(
+      `The user's vocabulary — names and terms they say often, spelled the way they want them:\n${vocabulary.join("\n")}\n\nSpeech recognition mangles unusual names. When a word in the transcript is phonetically close to one of these, it IS that term — use this spelling exactly. Judge by sound, not spelling, and never introduce a term the transcript doesn't sound like.`
+    );
   }
   if (Array.isArray(people) && people.length > 0) {
     contextParts.push(
