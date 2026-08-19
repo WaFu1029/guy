@@ -25,7 +25,7 @@ import {
 } from "d3-zoom";
 import { PinnedCard } from "@/components/PinnedCard";
 import { deriveOrgHubs, resolvePins } from "@/lib/orgHubs";
-import type { Person, Connection, Group } from "@/types/database";
+import type { Person, Connection, Group, Profile } from "@/types/database";
 
 // Force-directed network view. d3-force simulation (forceLink / forceManyBody /
 // forceCenter) rendered as plain SVG. Drag repositions transiently (pin while
@@ -114,6 +114,7 @@ export function ConnectionGraph({
   people,
   connections,
   groups = [],
+  profile = null,
   pinnedIds: controlledPinnedIds,
   onPinnedIdsChange,
   cardsClassName,
@@ -121,6 +122,9 @@ export function ConnectionGraph({
   people: Person[];
   connections: Connection[];
   groups?: Group[];
+  // The user's own details: names the You node and puts You inside the org
+  // hubs for the school/company they share with people in the graph.
+  profile?: Profile | null;
   // Pins are optionally controlled: the desktop layout owns them so the
   // detail cards can render in the right-hand column instead of over the
   // graph. Left uncontrolled, the graph keeps its own pin state.
@@ -188,7 +192,7 @@ export function ConnectionGraph({
     if (n.kind === "person") return !!n.groupId && legendFocus.has(n.groupId);
     // Org hub stays lit while any member's group is focused.
     const org = graph.orgs.get(n.id);
-    return !!org?.members.some((m) => m.group_id && legendFocus.has(m.group_id));
+    return !!org?.members.some((m) => m.groupId && legendFocus.has(m.groupId));
   };
   const searchLit = (n: SimNode): boolean => {
     const q = searchQuery.trim().toLowerCase();
@@ -219,7 +223,14 @@ export function ConnectionGraph({
 
   const graph = useMemo(() => {
     const nodes: SimNode[] = [
-      { id: "you", kind: "you", label: "You", sub: null, color: null, groupId: null },
+      {
+        id: "you",
+        kind: "you",
+        label: profile?.name?.trim() || "You",
+        sub: profile?.role?.trim() || null,
+        color: null,
+        groupId: null,
+      },
       ...people.map((p) => ({
         id: p.id,
         kind: "person" as const,
@@ -237,7 +248,7 @@ export function ConnectionGraph({
     }));
 
     // Derived org hubs get a synthesized node plus a dashed spoke per member.
-    const orgs = deriveOrgHubs(people);
+    const orgs = deriveOrgHubs(people, profile);
     for (const [id, bucket] of orgs) {
       nodes.push({
         id,
@@ -254,7 +265,7 @@ export function ConnectionGraph({
 
     return { nodes, links, orgs };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [people, connections, groups]);
+  }, [people, connections, groups, profile]);
 
   // Resolve pins into cards — a pin is either a person or a derived org hub.
   const pinnedEntries = resolvePins(pinnedIds, people, graph.orgs);
@@ -526,10 +537,29 @@ export function ConnectionGraph({
               >
                 {n.kind === "you" ? "You" : truncate(n.label, 18)}
               </text>
-              {n.kind !== "you" && n.sub && (
+              {/* The You circle says "You"; a set profile name goes underneath
+                  it, where every other node carries its label. */}
+              {n.kind === "you" && n.label !== "You" && (
                 <text
                   x={n.x}
-                  y={(n.y ?? 0) + NODE_RADIUS[n.kind] + 26}
+                  y={(n.y ?? 0) + NODE_RADIUS.you + 14}
+                  textAnchor="middle"
+                  fill="var(--g-label)"
+                  fontSize={12}
+                  fontWeight={600}
+                  className="pointer-events-none"
+                >
+                  {truncate(n.label, 18)}
+                </text>
+              )}
+              {n.sub && (
+                <text
+                  x={n.x}
+                  y={
+                    (n.y ?? 0) +
+                    NODE_RADIUS[n.kind] +
+                    (n.kind === "you" && n.label === "You" ? 14 : 26)
+                  }
                   textAnchor="middle"
                   fill="var(--g-sub)"
                   fontSize={9}

@@ -14,7 +14,7 @@ export function DeletePersonButton({
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <div className="mt-4">
+    <div>
       <button
         type="button"
         disabled={busy}

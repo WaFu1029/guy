@@ -2,6 +2,31 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import type { Profile } from "@/types/database";
+
+// The user's own details — name, what they do, school, company. Upserted on
+// user_id (the primary key), so the row is created on first save. Empty
+// strings clear a column. RLS scopes the write.
+export async function updateProfile(fields: {
+  name?: string;
+  role?: string;
+  school?: string;
+  company?: string;
+}) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in");
+
+  const patch: Partial<Profile> & { user_id: string } = { user_id: user.id };
+  for (const key of ["name", "role", "school", "company"] as const) {
+    if (fields[key] !== undefined) patch[key] = fields[key]!.trim() || null;
+  }
+
+  const { error } = await supabase.from("profiles").upsert(patch, { onConflict: "user_id" });
+  if (error) throw new Error(error.message);
+}
 
 export async function deletePerson(personId: string) {
   const supabase = await createClient();

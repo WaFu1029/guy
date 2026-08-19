@@ -4,6 +4,7 @@ import { ContactBook } from "@/components/ContactBook";
 import { AccountDanger } from "@/components/AccountDanger";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { VocabManager } from "@/components/VocabManager";
+import { YourProfile } from "@/components/YourProfile";
 
 export default async function AccountPage() {
   const supabase = await createClient();
@@ -13,8 +14,13 @@ export default async function AccountPage() {
 
   if (!user) return null;
 
-  const [{ data: people }, { data: groups }, { count: pendingCount }, { data: vocab }] =
-    await Promise.all([
+  const [
+    { data: people },
+    { data: groups },
+    { count: pendingCount },
+    { data: vocab },
+    { data: profile },
+  ] = await Promise.all([
     supabase.from("people").select("*").order("name", { ascending: true }),
     supabase.from("groups").select("*").order("created_at", { ascending: true }),
     supabase
@@ -22,6 +28,8 @@ export default async function AccountPage() {
       .select("*", { count: "exact", head: true })
       .eq("status", "pending"),
     supabase.from("vocab_terms").select("*").order("created_at", { ascending: true }),
+    // maybeSingle: the row doesn't exist until the first save.
+    supabase.from("profiles").select("*").maybeSingle(),
   ]);
 
   return (
@@ -42,6 +50,15 @@ export default async function AccountPage() {
             <p className="text-xs text-neutral-500 dark:text-neutral-400">follow-ups pending</p>
           </div>
         </div>
+      </div>
+
+      <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-5">
+        <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">You</p>
+        <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
+          Your own details. Share a school or company with someone you&apos;ve met and
+          you&apos;ll both show up in that org&apos;s hub on the network.
+        </p>
+        <YourProfile profile={profile ?? null} />
       </div>
 
       <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-5">

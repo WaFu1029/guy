@@ -5,7 +5,7 @@ import { ConnectionGraph } from "@/components/ConnectionGraph";
 import { FollowUpBar, type DueFollowUp } from "@/components/FollowUpBar";
 import { PinnedCard } from "@/components/PinnedCard";
 import { deriveOrgHubs, resolvePins } from "@/lib/orgHubs";
-import type { Person, Connection, Group } from "@/types/database";
+import type { Person, Connection, Group, Profile } from "@/types/database";
 
 // Desktop network view: graph on the left, right column split in half —
 // detail panels for the pinned nodes on top, due follow-ups underneath.
@@ -17,14 +17,16 @@ export function NetworkDesk({
   connections,
   groups,
   followUps,
+  profile,
 }: {
   people: Person[];
   connections: Connection[];
   groups: Group[];
   followUps: DueFollowUp[];
+  profile: Profile | null;
 }) {
   const [pinnedIds, setPinnedIds] = useState<readonly string[]>([]);
-  const orgs = useMemo(() => deriveOrgHubs(people), [people]);
+  const orgs = useMemo(() => deriveOrgHubs(people, profile), [people, profile]);
   const pinnedEntries = useMemo(
     () => resolvePins(pinnedIds, people, orgs),
     [pinnedIds, people, orgs]
@@ -38,6 +40,7 @@ export function NetworkDesk({
           people={people}
           connections={connections}
           groups={groups}
+          profile={profile}
           pinnedIds={pinnedIds}
           onPinnedIdsChange={setPinnedIds}
           // The side panel owns the cards from `lg` up.

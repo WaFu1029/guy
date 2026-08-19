@@ -42,20 +42,35 @@ export function PinnedCard({
           </button>
         </div>
         <div className="mt-2 flex flex-col gap-1">
-          {org.members.map((m) => (
-            <Link
-              key={m.id}
-              href={`/people/${m.id}`}
-              className="flex items-baseline gap-2 rounded-lg px-1 py-0.5 text-sm text-neutral-900 dark:text-neutral-50 hover:bg-neutral-100 dark:hover:bg-neutral-700"
-            >
-              <span className="font-medium">{m.name}</span>
-              {m.role && (
-                <span className="truncate text-xs text-neutral-500 dark:text-neutral-400">
-                  {m.role}
-                </span>
-              )}
-            </Link>
-          ))}
+          {org.members.map((m) => {
+            const row = (
+              <>
+                <span className="font-medium">{m.isSelf ? `${m.name} (you)` : m.name}</span>
+                {m.role && (
+                  <span className="truncate text-xs text-neutral-500 dark:text-neutral-400">
+                    {m.role}
+                  </span>
+                )}
+              </>
+            );
+            // The user is a hub member like anyone else, but has no person page.
+            return m.isSelf ? (
+              <div
+                key={m.id}
+                className="flex items-baseline gap-2 rounded-lg px-1 py-0.5 text-sm text-neutral-900 dark:text-neutral-50"
+              >
+                {row}
+              </div>
+            ) : (
+              <Link
+                key={m.id}
+                href={`/people/${m.id}`}
+                className="flex items-baseline gap-2 rounded-lg px-1 py-0.5 text-sm text-neutral-900 dark:text-neutral-50 hover:bg-neutral-100 dark:hover:bg-neutral-700"
+              >
+                {row}
+              </Link>
+            );
+          })}
         </div>
       </div>
     );

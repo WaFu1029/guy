@@ -38,12 +38,15 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   ]);
 
   return (
-    <div className="mx-auto w-full max-w-md px-4 pb-8 pt-2">
+    <div className="mx-auto w-full max-w-md px-4 pb-8 pt-2 lg:max-w-7xl lg:px-7">
       <Link href="/" className="text-sm text-neutral-400 dark:text-neutral-500 hover:underline">
         ← Network
       </Link>
 
-      <div className="mt-3 rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-6">
+      {/* Phone: one card. Desktop: the profile on the left, everything that
+          hangs off it — connections, follow-ups, danger zone — on the right. */}
+      <div className="mt-3 flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4">
+      <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-6 lg:px-7">
         <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">{person.name}</h1>
 
         <LeadHeatPicker personId={person.id} heat={person.lead_heat} />
@@ -62,9 +65,11 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
             vocabulary={(vocab ?? []).map((v) => (v.hint ? `${v.term} (${v.hint})` : v.term))}
           />
         </div>
+      </div>
 
+      <div className="flex flex-col gap-3">
         {connections && connections.length > 0 && (
-          <div className="mt-4">
+          <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-5">
             <h2 className="mb-1 text-sm font-semibold text-neutral-900 dark:text-neutral-50">Connections</h2>
             <ul className="flex flex-col gap-2">
               {connections.map((c) => {
@@ -88,7 +93,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         )}
 
         {followUps && followUps.length > 0 && (
-          <div className="mt-4">
+          <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-5">
             <h2 className="mb-1 text-sm font-semibold text-neutral-900 dark:text-neutral-50">Follow-ups</h2>
             <ul className="flex flex-col gap-2">
               {followUps.map((f) => (
@@ -106,7 +111,10 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
             </ul>
           </div>
         )}
-        <DeletePersonButton personId={person.id} personName={person.name} />
+        <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 px-5 py-5">
+          <DeletePersonButton personId={person.id} personName={person.name} />
+        </div>
+      </div>
       </div>
     </div>
   );

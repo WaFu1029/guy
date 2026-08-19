@@ -11,8 +11,13 @@ export default async function HomePage() {
   // (auth.uid() = user_id) — so the check guarded nothing, while costing a
   // second sequential round trip to the Supabase auth server (~150ms) before
   // any data fetching could start.
-  const [{ data: people }, { data: connections }, { data: groups }, { data: dueFollowUps }] =
-    await Promise.all([
+  const [
+    { data: people },
+    { data: connections },
+    { data: groups },
+    { data: dueFollowUps },
+    { data: profile },
+  ] = await Promise.all([
     supabase.from("people").select("*").order("created_at", { ascending: false }),
     supabase.from("connections").select("*"),
     supabase.from("groups").select("*").order("created_at", { ascending: true }),
@@ -22,6 +27,8 @@ export default async function HomePage() {
       .eq("status", "pending")
       .lte("due_at", new Date().toISOString())
       .order("due_at", { ascending: true }),
+    // The user's own details — absent until they fill them in on /account.
+    supabase.from("profiles").select("*").maybeSingle(),
   ]);
 
   const followUps: DueFollowUp[] = (dueFollowUps ?? []).map((f) => ({
@@ -40,6 +47,7 @@ export default async function HomePage() {
           connections={connections ?? []}
           groups={groups ?? []}
           followUps={followUps}
+          profile={profile ?? null}
         />
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-3xl bg-neutral-100 dark:bg-neutral-900 p-8 text-center">

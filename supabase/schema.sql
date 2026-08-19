@@ -16,6 +16,20 @@ create table if not exists groups (
 
 create index if not exists groups_user_id_idx on groups(user_id);
 
+-- The user's own details. One row per auth user, created on first save.
+-- Powers the "You" node in the graph: the name it renders under, and the
+-- school/company that let You join an org hub alongside the people you met.
+create table if not exists profiles (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  name text,
+  -- What the user does — mirrors people.role.
+  role text,
+  school text,
+  company text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 -- People the user has met. Each row is a graph node.
 create table if not exists people (
   id uuid primary key default gen_random_uuid(),
@@ -98,17 +112,27 @@ begin
 end;
 $$ language plpgsql;
 
+drop trigger if exists profiles_set_updated_at on profiles;
+create trigger profiles_set_updated_at
+  before update on profiles
+  for each row execute function set_updated_at();
+
 drop trigger if exists people_set_updated_at on people;
 create trigger people_set_updated_at
   before update on people
   for each row execute function set_updated_at();
 
 -- Row Level Security: every row is scoped to its owning user.
+alter table profiles enable row level security;
 alter table groups enable row level security;
 alter table people enable row level security;
 alter table connections enable row level security;
 alter table follow_ups enable row level security;
 alter table vocab_terms enable row level security;
+
+drop policy if exists "profiles owner access" on profiles;
+create policy "profiles owner access" on profiles
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 drop policy if exists "groups owner access" on groups;
 create policy "groups owner access" on groups
@@ -148,3 +172,5 @@ create policy "follow_ups owner access" on follow_ups
 --     check (lead_heat between 1 and 5);
 -- Migration for databases created before the vocabulary existed:
 --   (run the vocab_terms create table + index + RLS block above)
+-- Migration for databases created before the user's own profile existed:
+--   (run the profiles create table + RLS + updated_at trigger blocks above)

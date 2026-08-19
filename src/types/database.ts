@@ -10,6 +10,18 @@ export type Group = {
   created_at: string;
 };
 
+// The user's own details — one row per auth user, absent until first save.
+export type Profile = {
+  user_id: string;
+  name: string | null;
+  // What the user does.
+  role: string | null;
+  school: string | null;
+  company: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Person = {
   id: string;
   user_id: string;
@@ -69,6 +81,12 @@ export type Database = {
         Row: Group;
         Insert: Partial<Group> & { user_id: string; name: string; color: string };
         Update: Partial<Group>;
+        Relationships: [];
+      };
+      profiles: {
+        Row: Profile;
+        Insert: Partial<Profile> & { user_id: string };
+        Update: Partial<Profile>;
         Relationships: [];
       };
       people: {
