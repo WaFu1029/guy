@@ -1,3 +1,4 @@
+import { canonicalOrg } from "@/lib/orgNames";
 import type { Person, Profile } from "@/types/database";
 
 // The graph id of the user's own node. The user is a member of an org hub
@@ -24,6 +25,8 @@ export type OrgHub = {
 };
 
 // Bucket people by company and by school, keep buckets with ≥2 members.
+// Names are canonicalized first (see canonicalOrg), so "Columbia University"
+// and "Columbia" land in one hub labeled "Columbia".
 // The user's own profile joins the buckets too, so "you + one Columbian"
 // is enough to raise a Columbia hub with You wired into it.
 // Shared by the graph (which renders hub nodes) and by anything that needs to
@@ -58,24 +61,43 @@ export function deriveOrgHubs(
     });
   }
 
-  const buckets = new Map<string, OrgHub>();
+  // Canonicalization can hand back different labels for one key when nobody's
+  // spelling is an alias ("Acme Labs" vs "acme labs"), so the spelling used by
+  // the most people wins, first-seen breaking ties.
+  const buckets = new Map<string, { hub: OrgHub; labelCounts: Map<string, number> }>();
   for (const entry of entries) {
     const sources = [
       { kind: "company" as const, value: entry.company },
       { kind: "school" as const, value: entry.school },
     ];
     for (const { kind, value } of sources) {
-      const label = value?.trim();
-      if (!label) continue;
-      const id = `org:${kind}:${label.toLowerCase()}`;
-      const bucket = buckets.get(id) ?? { id, kind, label, members: [] };
-      bucket.members.push(entry.member);
+      const canonical = value ? canonicalOrg(value, kind) : null;
+      if (!canonical) continue;
+      const id = `org:${kind}:${canonical.key}`;
+      const bucket = buckets.get(id) ?? {
+        hub: { id, kind, label: canonical.label, members: [] },
+        labelCounts: new Map<string, number>(),
+      };
+      bucket.hub.members.push(entry.member);
+      bucket.labelCounts.set(
+        canonical.label,
+        (bucket.labelCounts.get(canonical.label) ?? 0) + 1
+      );
       buckets.set(id, bucket);
     }
   }
   const orgs = new Map<string, OrgHub>();
-  for (const [id, bucket] of buckets) {
-    if (bucket.members.length >= 2) orgs.set(id, bucket);
+  for (const [id, { hub, labelCounts }] of buckets) {
+    if (hub.members.length < 2) continue;
+    let best = hub.label;
+    let bestCount = 0;
+    for (const [label, count] of labelCounts) {
+      if (count > bestCount) {
+        best = label;
+        bestCount = count;
+      }
+    }
+    orgs.set(id, { ...hub, label: best });
   }
   return orgs;
 }

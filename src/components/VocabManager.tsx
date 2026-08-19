@@ -92,6 +92,9 @@ function TeachButton({
   );
 }
 
+// A long vocabulary shouldn't push the contact book off the screen.
+const VISIBLE_TERMS = 3;
+
 // Manage the spoken-word canon. Anything listed here is handed to the voice
 // extractor as a correct spelling to snap near-misses onto, which is the only
 // fix for a name the transcriber refuses to hear ("Bangle" -> "bungle").
@@ -100,6 +103,7 @@ export function VocabManager({ terms }: { terms: VocabTerm[] }) {
   const [term, setTerm] = useState("");
   const [hint, setHint] = useState("");
   const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const add = async () => {
@@ -198,7 +202,7 @@ export function VocabManager({ terms }: { terms: VocabTerm[] }) {
 
       {terms.length > 0 && (
         <div className="mt-3 flex flex-col gap-1.5">
-          {terms.map((t) => (
+          {(expanded ? terms : terms.slice(0, VISIBLE_TERMS)).map((t) => (
             <div
               key={t.id}
               className="flex items-start justify-between gap-3 rounded-xl bg-white dark:bg-neutral-800 px-3 py-2"
@@ -240,6 +244,17 @@ export function VocabManager({ terms }: { terms: VocabTerm[] }) {
               </div>
             </div>
           ))}
+          {terms.length > VISIBLE_TERMS && (
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              className="self-start text-xs text-neutral-500 dark:text-neutral-400 underline underline-offset-2"
+            >
+              {expanded
+                ? "Show less"
+                : `Show all ${terms.length} (${terms.length - VISIBLE_TERMS} more)`}
+            </button>
+          )}
         </div>
       )}
     </div>

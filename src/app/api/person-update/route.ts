@@ -27,7 +27,11 @@ const UPDATE_PERSON_TOOL = {
       },
       role: { type: "string", description: "Updated job title, if the user corrected it." },
       company: { type: "string", description: "Updated company, if the user corrected it." },
-      school: { type: "string", description: "School or university to set, if mentioned." },
+      school: {
+        type: "string",
+        description:
+          "School or university to set, if mentioned. Use the short name people say — 'Columbia', 'UC Berkeley' — not the full legal name.",
+      },
       met_at: { type: "string", description: "Updated event/place they met, if corrected." },
       how_they_help: {
         type: "string",

@@ -20,12 +20,13 @@ const RECORD_CONNECTION_TOOL = {
       },
       company: {
         type: "string",
-        description: "Their company or organization, if mentioned.",
+        description:
+          "Their company or organization, if mentioned. Use the everyday short name, not the legal one — 'Google', not 'Google LLC'.",
       },
       school: {
         type: "string",
         description:
-          "The school or university they attend (or attended), if mentioned. Set this for grouping — but ALSO work the fact into context, since school is part of what they do.",
+          "The school or university they attend (or attended), if mentioned. Use the short name people actually say — 'Columbia', 'Stanford', 'UC Berkeley', 'MIT' — not the full legal name ('Columbia University', 'University of California, Berkeley'). Set this for grouping — but ALSO work the fact into context, since school is part of what they do.",
       },
       met_at: {
         type: "string",
