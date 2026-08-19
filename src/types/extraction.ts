@@ -34,6 +34,8 @@ export interface ExtractedConnection {
 
 // Patch extracted from a voice command on a person's profile page.
 export interface PersonUpdate {
+  // A corrected name — only set when the user is fixing a misheard spelling.
+  name?: string;
   note?: string;
   note_mode?: "append" | "replace";
   role?: string;

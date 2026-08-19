@@ -111,6 +111,7 @@ export async function applyPersonUpdate(personId: string, update: PersonUpdate):
     }
   }
   for (const key of [
+    "name",
     "role",
     "company",
     "school",

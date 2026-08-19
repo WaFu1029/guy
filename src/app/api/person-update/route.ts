@@ -20,6 +20,11 @@ const UPDATE_PERSON_TOOL = {
         description:
           "How to apply the note: 'append' adds to the existing notes (default), 'replace' overwrites them. Use replace only when the user clearly says to replace/rewrite/clear the notes.",
       },
+      name: {
+        type: "string",
+        description:
+          "Corrected name for this person, if the user fixes it ('her name is spelled Fu, F-U, not Foo'). Letters spoken individually are the user repairing a misheard name — assemble them and trust that spelling. Omit unless the name is being corrected.",
+      },
       role: { type: "string", description: "Updated job title, if the user corrected it." },
       company: { type: "string", description: "Updated company, if the user corrected it." },
       school: { type: "string", description: "School or university to set, if mentioned." },

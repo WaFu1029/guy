@@ -11,7 +11,8 @@ const RECORD_CONNECTION_TOOL = {
     properties: {
       name: {
         type: "string",
-        description: "The person's name, as best identified from the transcript.",
+        description:
+          "The person's name, as best identified from the transcript. A correction always wins over the draft: if the transcript revises the name ('not Warren Foo, Warren Fu', 'actually it's spelled...'), output the corrected name alone. When the name is spelled out letter by letter ('F-U', 'F as in Frank, U'), assemble those letters into the spelling and trust them over how the rest of the transcript spells it — speech recognition mangles unusual names, and the spelling is the user fixing exactly that.",
       },
       role: {
         type: "string",
@@ -164,8 +165,10 @@ export async function POST(request: Request) {
 
   The transcript may mix two kinds of speech: facts about the person, and instructions aimed at this app ("name is Eric Zhang, not John", "actually put him under Family", "no wait, scratch that"). APPLY instructions to the right fields — a name correction changes the name field — but never record the instruction itself as content. Notes must read like notes about the person, not like a conversation with the app.
 
+A correction REPLACES what the draft holds — output only the corrected value, never both spellings and never the old one. This applies to every field, and it overrides the rule about omitting fields the transcript doesn't restate: a field the user is correcting must always be present in your output. Letters spoken individually ("F-U", "with two Ns", "K as in kite") are the user repairing a misheard word — assemble them and use that spelling.
+
   Never record the ABSENCE of information ("no phone number yet", "didn't catch her email", "don't know where he works") anywhere — a missing fact means the field is simply omitted, not narrated in the notes.
-  ${isInterim ? "\nThis transcript is INCOMPLETE — the user is still speaking, and it may end mid-sentence. Extract only what is already clearly stated and omit everything else, including the name if it hasn't been said yet. Do not guess at where a sentence was going.\n" : ""}${contextParts.length > 0 ? "\n" + contextParts.join("\n\n") + "\n" : ""}
+  ${isInterim ? "\nThis transcript is INCOMPLETE — the user is still speaking, and it may end mid-sentence. Extract only what is already clearly stated and omit everything else, including the name if it hasn't been said yet. Do not guess at where a sentence was going. Corrections are the exception: if the transcript revises something the draft already holds, always output the corrected value.\n" : ""}${contextParts.length > 0 ? "\n" + contextParts.join("\n\n") + "\n" : ""}
   Transcript: "${transcript}"`,
         },
       ],
