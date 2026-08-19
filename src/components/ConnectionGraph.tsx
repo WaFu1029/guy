@@ -25,6 +25,7 @@ import {
 } from "d3-zoom";
 import { PinnedCard } from "@/components/PinnedCard";
 import { deriveOrgHubs, resolvePins } from "@/lib/orgHubs";
+import { untangle } from "@/lib/untangle";
 import type { Person, Connection, Group, Profile } from "@/types/database";
 
 // Force-directed network view. d3-force simulation (forceLink / forceManyBody /
@@ -105,6 +106,8 @@ function readStoredForces(): ForceParams {
 const ZOOM_EXTENT: [number, number] = [0.25, 6];
 // Pointer-up within this many screen px of pointer-down is a tap, not a drag.
 const CLICK_SLOP = 8;
+// How long the post-settle untangle takes to slide nodes into their new slots.
+const UNTANGLE_MS = 420;
 
 function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max).trimEnd() + "…" : s;
@@ -278,6 +281,13 @@ export function ConnectionGraph({
   const svgRef = useRef<SVGSVGElement | null>(null);
   const dragIdRef = useRef<string | null>(null);
   const downPosRef = useRef<{ x: number; y: number } | null>(null);
+  // Animation frame for the untangle slide, so a drag can interrupt it.
+  const tweenRef = useRef(0);
+  // The live untangle pass, so the Tidy button can re-run it on demand.
+  const settleRef = useRef<(() => void) | null>(null);
+  // Edge crossings left after the last untangle — surfaced in the Forces panel,
+  // since it's the number that tracks how tangled the picture actually looks.
+  const [crossings, setCrossings] = useState<number | null>(null);
 
   const [zoomTransform, setZoomTransform] = useState<ZoomTransform>(zoomIdentity);
   const zoomTransformRef = useRef<ZoomTransform>(zoomIdentity);
@@ -287,6 +297,56 @@ export function ConnectionGraph({
   useEffect(() => {
     const nodes: SimNode[] = graph.nodes.map((n) => ({ ...n }));
     const links: SimLink[] = graph.links.map((l) => ({ ...l }));
+    // You is the anchor everything else is described relative to, so it holds
+    // the center instead of being pushed around by the repulsion. A centered
+    // hub is also what lets its spokes fan out without crossing each other.
+    const you = nodes.find((n) => n.kind === "you");
+    if (you) {
+      you.fx = viewW / 2;
+      you.fy = viewH / 2;
+    }
+
+    // The forces optimize distance, not readability. Once they cool, swap
+    // nodes between the positions they settled into wherever that removes
+    // edge crossings, and slide into the result so it reads as the layout
+    // tidying itself rather than teleporting.
+    const settle = () => {
+      if (dragIdRef.current) return;
+      const result = untangle(
+        nodes.map((n) => ({ id: n.id, x: n.x, y: n.y, fixed: n.kind === "you" })),
+        links.map((l) => ({
+          source: (l.source as SimNode).id,
+          target: (l.target as SimNode).id,
+        }))
+      );
+      setCrossings(result.after);
+      if (result.positions.size === 0) return;
+      const from = new Map(nodes.map((n) => [n.id, { x: n.x ?? 0, y: n.y ?? 0 }]));
+      const startedAt = performance.now();
+      const step = (now: number) => {
+        // A drag mid-slide wins; the next settle will untangle again.
+        if (dragIdRef.current) return;
+        const t = Math.min(1, (now - startedAt) / UNTANGLE_MS);
+        const eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+        for (const n of nodes) {
+          const to = result.positions.get(n.id);
+          const start = from.get(n.id);
+          if (!to || !start) continue;
+          n.x = start.x + (to.x - start.x) * eased;
+          n.y = start.y + (to.y - start.y) * eased;
+          n.vx = 0;
+          n.vy = 0;
+        }
+        setSimNodes([...nodes]);
+        setSimLinks([...links]);
+        if (t < 1) tweenRef.current = requestAnimationFrame(step);
+      };
+      cancelAnimationFrame(tweenRef.current);
+      tweenRef.current = requestAnimationFrame(step);
+    };
+
+    settleRef.current = settle;
+
     const sim = forceSimulation<SimNode>(nodes)
       .force(
         "link",
@@ -319,11 +379,14 @@ export function ConnectionGraph({
       .on("tick", () => {
         setSimNodes([...nodes]);
         setSimLinks([...links]);
-      });
+      })
+      .on("end", settle);
     simRef.current = sim;
     return () => {
+      cancelAnimationFrame(tweenRef.current);
       sim.stop();
       simRef.current = null;
+      settleRef.current = null;
     };
   }, [graph]);
 
@@ -377,6 +440,7 @@ export function ConnectionGraph({
   // Transient drag: pin the node to the pointer (fx/fy) while down, release on
   // up. A stationary press-and-release on a person node is a tap → navigate.
   const onNodeDown = (id: string) => (e: React.PointerEvent) => {
+    cancelAnimationFrame(tweenRef.current);
     dragIdRef.current = id;
     downPosRef.current = { x: e.clientX, y: e.clientY };
     (e.target as Element).setPointerCapture(e.pointerId);
@@ -405,8 +469,10 @@ export function ConnectionGraph({
     downPosRef.current = null;
     const node = simRef.current?.nodes().find((n) => n.id === id);
     if (node) {
-      node.fx = null;
-      node.fy = null;
+      // You goes back to its anchor; everyone else is released to the forces.
+      const anchored = node.kind === "you";
+      node.fx = anchored ? viewW / 2 : null;
+      node.fy = anchored ? viewH / 2 : null;
     }
     simRef.current?.alphaTarget(0);
     if (
@@ -646,13 +712,27 @@ export function ConnectionGraph({
                 />
               </label>
             ))}
-            <button
-              type="button"
-              onClick={() => applyForceParams(FORCE_DEFAULTS)}
-              className="text-[11px] text-neutral-500 dark:text-neutral-400 underline underline-offset-2"
-            >
-              Reset forces
-            </button>
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => applyForceParams(FORCE_DEFAULTS)}
+                className="text-[11px] text-neutral-500 dark:text-neutral-400 underline underline-offset-2"
+              >
+                Reset forces
+              </button>
+              <button
+                type="button"
+                onClick={() => settleRef.current?.()}
+                className="rounded-full bg-neutral-900 dark:bg-neutral-100 px-2.5 py-1 text-[11px] text-neutral-50 dark:text-neutral-900"
+              >
+                Tidy
+              </button>
+            </div>
+            {crossings !== null && (
+              <p className="mt-1.5 text-[11px] text-neutral-500 dark:text-neutral-400">
+                {crossings} edge crossing{crossings === 1 ? "" : "s"}
+              </p>
+            )}
           </div>
         )}
       </div>

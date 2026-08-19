@@ -179,6 +179,19 @@ function stripGenerics(raw: string, kind: "company" | "school"): string {
   return s.trim();
 }
 
+// Alias lookup, with a second pass for spelled-out acronyms: "M.I.T."
+// normalizes to "m i t", which is the MIT entry once the gaps close. Only
+// all-single-letter keys are joined, so "uc berkeley" is left alone.
+function lookupAlias(key: string): string | undefined {
+  const direct = ALIASES[key];
+  if (direct) return direct;
+  const parts = key.split(" ");
+  if (parts.length > 1 && parts.every((p) => p.length === 1)) {
+    return ALIASES[parts.join("")];
+  }
+  return undefined;
+}
+
 export type CanonicalOrg = { key: string; label: string };
 
 // Canonicalize one raw org string. Returns null for blank input. `key` is what
@@ -190,14 +203,14 @@ export function canonicalOrg(raw: string, kind: "company" | "school"): Canonical
 
   const rawKey = normalizeKey(trimmed);
   if (!rawKey) return null;
-  const direct = ALIASES[rawKey];
+  const direct = lookupAlias(rawKey);
   if (direct) return { key: normalizeKey(direct), label: direct };
 
   const stripped = stripGenerics(trimmed, kind);
   const strippedKey = normalizeKey(stripped);
   // Stripping can itself land on an alias ("Columbia University" already hits
   // above, but "Univ. of Michigan" only matches once the prefix is gone).
-  const viaStrip = ALIASES[strippedKey];
+  const viaStrip = lookupAlias(strippedKey);
   if (viaStrip) return { key: normalizeKey(viaStrip), label: viaStrip };
 
   if (!strippedKey) return { key: rawKey, label: trimmed };

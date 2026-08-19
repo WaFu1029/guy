@@ -100,6 +100,17 @@ const VISIBLE_TERMS = 3;
 // fix for a name the transcriber refuses to hear ("Bangle" -> "bungle").
 export function VocabManager({ terms }: { terms: VocabTerm[] }) {
   const router = useRouter();
+  // The list renders from local state so a mutation shows up immediately.
+  // router.refresh() still runs to reconcile with the server, but waiting on
+  // it left removed aliases on screen — you'd click the same chip repeatedly
+  // and every call after the first was a no-op.
+  const [items, setItems] = useState(terms);
+  const [syncedTerms, setSyncedTerms] = useState(terms);
+  if (syncedTerms !== terms) {
+    // Server sent a new list — adopt it (React's adjust-state-during-render).
+    setSyncedTerms(terms);
+    setItems(terms);
+  }
   const [term, setTerm] = useState("");
   const [hint, setHint] = useState("");
   const [busy, setBusy] = useState(false);
@@ -111,7 +122,8 @@ export function VocabManager({ terms }: { terms: VocabTerm[] }) {
     setBusy(true);
     setError(null);
     try {
-      await addVocabTerm(term, hint);
+      const created = await addVocabTerm(term, hint);
+      setItems((cur) => (cur.some((t) => t.id === created.id) ? cur : [...cur, created]));
       setTerm("");
       setHint("");
       router.refresh();
@@ -131,7 +143,10 @@ export function VocabManager({ terms }: { terms: VocabTerm[] }) {
       return;
     }
     try {
-      await addVocabAliases(t.id, fresh);
+      const merged = await addVocabAliases(t.id, fresh);
+      setItems((cur) =>
+        cur.map((item) => (item.id === t.id ? { ...item, aliases: merged } : item))
+      );
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save what was heard");
@@ -141,6 +156,18 @@ export function VocabManager({ terms }: { terms: VocabTerm[] }) {
   const dropAlias = async (id: string, alias: string) => {
     setError(null);
     try {
+      setItems((cur) =>
+        cur.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                aliases: item.aliases.filter(
+                  (a) => normalizeAlias(a) !== normalizeAlias(alias)
+                ),
+              }
+            : item
+        )
+      );
       await removeVocabAlias(id, alias);
       router.refresh();
     } catch (err) {
@@ -151,6 +178,7 @@ export function VocabManager({ terms }: { terms: VocabTerm[] }) {
   const remove = async (id: string) => {
     setError(null);
     try {
+      setItems((cur) => cur.filter((t) => t.id !== id));
       await deleteVocabTerm(id);
       router.refresh();
     } catch (err) {
@@ -200,9 +228,9 @@ export function VocabManager({ terms }: { terms: VocabTerm[] }) {
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
-      {terms.length > 0 && (
+      {items.length > 0 && (
         <div className="mt-3 flex flex-col gap-1.5">
-          {(expanded ? terms : terms.slice(0, VISIBLE_TERMS)).map((t) => (
+          {(expanded ? items : items.slice(0, VISIBLE_TERMS)).map((t) => (
             <div
               key={t.id}
               className="flex items-start justify-between gap-3 rounded-xl bg-white dark:bg-neutral-800 px-3 py-2"
@@ -244,7 +272,7 @@ export function VocabManager({ terms }: { terms: VocabTerm[] }) {
               </div>
             </div>
           ))}
-          {terms.length > VISIBLE_TERMS && (
+          {items.length > VISIBLE_TERMS && (
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
@@ -252,7 +280,7 @@ export function VocabManager({ terms }: { terms: VocabTerm[] }) {
             >
               {expanded
                 ? "Show less"
-                : `Show all ${terms.length} (${terms.length - VISIBLE_TERMS} more)`}
+                : `Show all ${items.length} (${items.length - VISIBLE_TERMS} more)`}
             </button>
           )}
         </div>
