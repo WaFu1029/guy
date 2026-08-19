@@ -115,6 +115,7 @@ export function VocabManager({ terms }: { terms: VocabTerm[] }) {
   const [hint, setHint] = useState("");
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [learned, setLearned] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const add = async () => {
@@ -142,10 +143,19 @@ export function VocabManager({ terms }: { terms: VocabTerm[] }) {
       setError(`Heard it correctly as "${t.term}" — nothing to teach.`);
       return;
     }
+    setLearned(null);
     try {
       const merged = await addVocabAliases(t.id, fresh);
+      const added = merged.filter(
+        (a) => !t.aliases.some((old) => normalizeAlias(old) === normalizeAlias(a))
+      );
       setItems((cur) =>
         cur.map((item) => (item.id === t.id ? { ...item, aliases: merged } : item))
+      );
+      setLearned(
+        added.length > 0
+          ? `Learned ${added.map((a) => `“${a}”`).join(", ")} for ${t.term}.`
+          : `Already knew that one for ${t.term}.`
       );
       router.refresh();
     } catch (err) {
@@ -227,6 +237,9 @@ export function VocabManager({ terms }: { terms: VocabTerm[] }) {
       </form>
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {learned && !error && (
+        <p className="mt-2 text-sm text-emerald-700 dark:text-emerald-400">{learned}</p>
+      )}
 
       {items.length > 0 && (
         <div className="mt-3 flex flex-col gap-1.5">
@@ -240,23 +253,36 @@ export function VocabManager({ terms }: { terms: VocabTerm[] }) {
                 {t.hint && (
                   <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">{t.hint}</p>
                 )}
-                {t.aliases.length > 0 && (
+                {t.aliases.length > 0 ? (
                   <div className="mt-1 flex flex-wrap items-center gap-1">
                     <span className="text-[11px] text-neutral-400 dark:text-neutral-500">
                       heard as
                     </span>
                     {t.aliases.map((a) => (
-                      <button
+                      // The chip is a label, not a button — its whole job is to
+                      // show that the term has been taught. Removal lives on the
+                      // small ✕ so a glance at the list can't delete anything.
+                      <span
                         key={a}
-                        type="button"
-                        onClick={() => dropAlias(t.id, a)}
-                        title={`Remove "${a}"`}
-                        className="rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] text-neutral-600 dark:bg-neutral-700 dark:text-neutral-300"
+                        className="flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] text-emerald-900 dark:bg-emerald-500/15 dark:text-emerald-300"
                       >
-                        {a} ✕
-                      </button>
+                        “{a}”
+                        <button
+                          type="button"
+                          onClick={() => dropAlias(t.id, a)}
+                          aria-label={`Forget "${a}" for ${t.term}`}
+                          title={`Forget "${a}"`}
+                          className="text-emerald-700/60 hover:text-emerald-700 dark:text-emerald-300/50 dark:hover:text-emerald-200"
+                        >
+                          ✕
+                        </button>
+                      </span>
                     ))}
                   </div>
+                ) : (
+                  <p className="mt-1 text-[11px] text-neutral-400 dark:text-neutral-500">
+                    Not taught yet — hit Teach and say it a few times.
+                  </p>
                 )}
               </div>
               <div className="flex shrink-0 items-start gap-1.5">

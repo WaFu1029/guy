@@ -12,10 +12,15 @@
 export type LayoutNode = { id: string; x?: number; y?: number; fixed?: boolean };
 export type LayoutEdge = { source: string; target: string };
 
-// Above this many nodes the O(n²·E) sweep stops being free; the layout is
-// unreadable at that size anyway, so bail rather than jank the frame.
-const MAX_NODES = 140;
+// Above this many nodes the layout is unreadable no matter how it's arranged,
+// so don't spend anything on it.
+const MAX_NODES = 250;
 const MAX_PASSES = 8;
+// The sweep is O(n²·E) per pass, which is milliseconds at ~20 nodes and
+// seconds at ~100. It improves monotonically and can be stopped at any point,
+// so it runs against a frame-friendly budget instead of a size cutoff: small
+// graphs converge well inside it, big ones keep whatever they earned.
+const TIME_BUDGET_MS = 120;
 // Equal-crossings swaps are taken only when they also pull edge length in by
 // this much — enough to compact stragglers without churning the layout.
 const LENGTH_GAIN = 0.95;
@@ -144,9 +149,15 @@ export function untangle(nodes: LayoutNode[], edges: LayoutEdge[]): UntangleResu
     xs[j] = tx; ys[j] = ty;
   };
 
-  for (let pass = 0; pass < MAX_PASSES; pass++) {
+  const deadline = performance.now() + TIME_BUDGET_MS;
+  let outOfTime = false;
+  for (let pass = 0; pass < MAX_PASSES && !outOfTime; pass++) {
     let improved = false;
     for (let i = 0; i < nodes.length; i++) {
+      if (performance.now() > deadline) {
+        outOfTime = true;
+        break;
+      }
       if (fixed[i] || incident[i].length === 0) continue;
       for (let j = i + 1; j < nodes.length; j++) {
         if (fixed[j] || incident[j].length === 0) continue;

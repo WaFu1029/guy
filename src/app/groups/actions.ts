@@ -80,3 +80,17 @@ export async function updateGroup(
   if (error || !group) throw new Error(error?.message ?? "Failed to update group");
   return group as Group;
 }
+
+// Deleting a group only ungroups its people — people.group_id is
+// `on delete set null`, so nobody is removed along with the group.
+export async function deleteGroup(groupId: string): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in");
+
+  // RLS scopes the delete to the owner's rows.
+  const { error } = await supabase.from("groups").delete().eq("id", groupId);
+  if (error) throw new Error(error.message);
+}

@@ -1,19 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { updateGroup } from "@/app/groups/actions";
+import { useRouter } from "next/navigation";
+import { deleteGroup, updateGroup } from "@/app/groups/actions";
 import { GROUP_COLOR_PRESETS } from "@/lib/groupColors";
 import type { Group } from "@/types/database";
 
 // Account-section group editor: tap Edit to change a group's name, optional
 // description, and color. Color changes apply immediately; name/description
-// save on the Save button.
+// save on the Save button. Delete removes the group only — its people stay and
+// simply become ungrouped.
 export function GroupManager({ groups: initialGroups }: { groups: Group[] }) {
+  const router = useRouter();
   const [groups, setGroups] = useState<Group[]>(initialGroups);
   const [openId, setOpenId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [saving, setSaving] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const applyUpdate = (updated: Group) =>
@@ -23,7 +28,13 @@ export function GroupManager({ groups: initialGroups }: { groups: Group[] }) {
     setOpenId(g.id);
     setDraftName(g.name);
     setDraftDescription(g.description ?? "");
+    setConfirmingDelete(false);
     setError(null);
+  };
+
+  const closeEditor = () => {
+    setOpenId(null);
+    setConfirmingDelete(false);
   };
 
   if (groups.length === 0) {
@@ -36,7 +47,7 @@ export function GroupManager({ groups: initialGroups }: { groups: Group[] }) {
         <div key={g.id} className={"rounded-xl bg-white dark:bg-neutral-800 " + (openId === g.id ? "p-4" : "px-3 py-2.5")}>
           <button
             type="button"
-            onClick={() => (openId === g.id ? setOpenId(null) : openEditor(g))}
+            onClick={() => (openId === g.id ? closeEditor() : openEditor(g))}
             className="flex w-full items-center gap-2 text-left text-sm text-neutral-900 dark:text-neutral-50"
           >
             <span
@@ -92,27 +103,62 @@ export function GroupManager({ groups: initialGroups }: { groups: Group[] }) {
                   />
                 ))}
               </div>
-              <button
-                type="button"
-                disabled={saving || !draftName.trim()}
-                onClick={async () => {
-                  setSaving(true);
-                  setError(null);
-                  try {
-                    applyUpdate(
-                      await updateGroup(g.id, { name: draftName, description: draftDescription })
-                    );
-                    setOpenId(null);
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : "Failed to save");
-                  } finally {
-                    setSaving(false);
-                  }
-                }}
-                className="mt-1 self-start rounded-full bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:text-neutral-50 px-5 py-2.5 text-xs font-medium text-neutral-50 disabled:opacity-40"
-              >
-                {saving ? "Saving…" : "Save"}
-              </button>
+              <div className="mt-1 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={saving || deleting || !draftName.trim()}
+                  onClick={async () => {
+                    setSaving(true);
+                    setError(null);
+                    try {
+                      applyUpdate(
+                        await updateGroup(g.id, { name: draftName, description: draftDescription })
+                      );
+                      closeEditor();
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "Failed to save");
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                  className="self-start rounded-full bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:text-neutral-50 px-5 py-2.5 text-xs font-medium text-neutral-50 disabled:opacity-40"
+                >
+                  {saving ? "Saving…" : "Save"}
+                </button>
+                <button
+                  type="button"
+                  disabled={saving || deleting}
+                  onClick={async () => {
+                    // First tap arms the button, second one actually deletes.
+                    if (!confirmingDelete) {
+                      setConfirmingDelete(true);
+                      setError(null);
+                      return;
+                    }
+                    setDeleting(true);
+                    setError(null);
+                    try {
+                      await deleteGroup(g.id);
+                      setGroups((cur) => cur.filter((x) => x.id !== g.id));
+                      closeEditor();
+                      // The people who were in this group now render ungrouped.
+                      router.refresh();
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "Failed to delete group");
+                    } finally {
+                      setDeleting(false);
+                    }
+                  }}
+                  className="self-start rounded-full px-5 py-2.5 text-xs font-medium text-red-600 dark:text-red-400 disabled:opacity-40"
+                >
+                  {deleting ? "Deleting…" : confirmingDelete ? "Tap again to delete" : "Delete group"}
+                </button>
+              </div>
+              {confirmingDelete && !deleting && (
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                  Everyone in this group stays — they just become ungrouped.
+                </p>
+              )}
             </div>
           )}
         </div>
