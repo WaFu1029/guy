@@ -312,12 +312,28 @@ export function ConnectionGraph({
     // tidying itself rather than teleporting.
     const settle = () => {
       if (dragIdRef.current) return;
+      // Relocation is bounded by the layout the forces produced, so a node
+      // can be slid into a gap but never flung outside the picture.
+      const xsAll = nodes.map((n) => n.x ?? 0);
+      const ysAll = nodes.map((n) => n.y ?? 0);
       const result = untangle(
-        nodes.map((n) => ({ id: n.id, x: n.x, y: n.y, fixed: n.kind === "you" })),
+        nodes.map((n) => ({
+          id: n.id,
+          x: n.x,
+          y: n.y,
+          fixed: n.kind === "you",
+          radius: NODE_RADIUS[n.kind] + LABEL_SPACE,
+        })),
         links.map((l) => ({
           source: (l.source as SimNode).id,
           target: (l.target as SimNode).id,
-        }))
+        })),
+        {
+          minX: Math.min(...xsAll),
+          minY: Math.min(...ysAll),
+          maxX: Math.max(...xsAll),
+          maxY: Math.max(...ysAll),
+        }
       );
       setCrossings(result.after);
       if (result.positions.size === 0) return;

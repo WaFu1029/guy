@@ -1,7 +1,8 @@
 "use client";
 
 import Link, { useLinkStatus } from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect } from "react";
 
 const TABS = [
   { href: "/", label: "Network" },
@@ -27,10 +28,27 @@ function PendingDot() {
 
 export function TopNav() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  // Option+1/2/3 jumps between the tabs. Matched on e.code because Option+digit
+  // on macOS reports key as "¡"/"™"/"£", not the digit.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.altKey || e.metaKey || e.ctrlKey) return;
+      const index = TABS.findIndex((_, i) => e.code === `Digit${i + 1}`);
+      if (index === -1) return;
+      // Stops the browser inserting the Option-modified character when the
+      // shortcut fires with a text field focused.
+      e.preventDefault();
+      router.push(TABS[index].href);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [router]);
 
   return (
     <nav className="mx-auto flex w-full max-w-md items-baseline gap-4 px-5 pb-2 pt-6 lg:max-w-7xl lg:px-7">
-      {TABS.map((tab) => {
+      {TABS.map((tab, i) => {
         const active =
           tab.href === "/" ? pathname === "/" : pathname.startsWith(tab.href);
         return (
@@ -44,6 +62,13 @@ export function TopNav() {
             }
           >
             {tab.label}.
+            {/* Hidden on touch-sized screens, where there's no key to press. */}
+            <span
+              aria-hidden
+              className="ml-1 hidden align-super text-[10px] font-normal tabular-nums text-neutral-400 dark:text-neutral-500 sm:inline"
+            >
+              ⌥{i + 1}
+            </span>
             <PendingDot />
           </Link>
         );

@@ -9,6 +9,7 @@ import { vocabLine } from "@/lib/vocab";
 import { DeletePersonButton } from "@/components/DeletePersonButton";
 import { ProfileFields } from "@/components/ProfileFields";
 import { LeadHeatPicker } from "@/components/LeadHeatPicker";
+import { PersonNameEdit } from "@/components/PersonNameEdit";
 
 export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -51,7 +52,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           hangs off it — connections, follow-ups, danger zone — on the right. */}
       <div className="mt-3 flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4">
       <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-6 lg:px-7">
-        <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-50">{person.name}</h1>
+        <PersonNameEdit personId={person.id} name={person.name} />
 
         <LeadHeatPicker personId={person.id} heat={person.lead_heat} />
 

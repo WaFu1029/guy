@@ -10,6 +10,7 @@ import type { Person } from "@/types/database";
 export async function updatePersonFields(
   personId: string,
   fields: {
+    name?: string;
     role?: string;
     how_they_help?: string;
     company?: string;
@@ -29,6 +30,14 @@ export async function updatePersonFields(
   if (!user) throw new Error("Not signed in");
 
   const patch: Partial<Person> = {};
+  // Name is the one column that can't be cleared — every other field treats an
+  // empty string as "unset", but a person with no name can't be rendered or
+  // found, and the column is NOT NULL.
+  if (fields.name !== undefined) {
+    const name = fields.name.trim();
+    if (!name) throw new Error("A name is required");
+    patch.name = name;
+  }
   for (const key of [
     "role",
     "how_they_help",

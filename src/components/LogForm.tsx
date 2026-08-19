@@ -448,6 +448,34 @@ export function LogForm({
     }
   }
 
+  // Option+R toggles the recording, Option+S saves. Held in a ref so the
+  // listener below always calls the current closures without rebinding.
+  const shortcutsRef = useRef<{ toggleRecording: () => void; save: () => void }>(null!);
+  shortcutsRef.current = {
+    toggleRecording: () => {
+      if (status === "recording") stopAndExtract();
+      else if (status === "idle") startRecording();
+    },
+    save: () => {
+      if (status !== "saving" && fields.name.trim()) handleSave();
+    },
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.altKey || e.metaKey || e.ctrlKey) return;
+      // Matched on e.code because Option+letter on macOS reports key as the
+      // accented character ("®", "ß"), not the letter.
+      if (e.code !== "KeyR" && e.code !== "KeyS") return;
+      // Stops the browser inserting that character when a field has focus.
+      e.preventDefault();
+      if (e.code === "KeyR") shortcutsRef.current.toggleRecording();
+      else shortcutsRef.current.save();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   // Full-width rows. "What they Do" is a textarea — it usually holds a few
   // sentences of spoken context, so it opens at four lines instead of one.
   const rows: {
@@ -775,7 +803,10 @@ export function LogForm({
           <button
             type="button"
             onClick={status === "recording" ? stopAndExtract : startRecording}
-            aria-label={status === "recording" ? "Stop recording" : "Start recording"}
+            aria-label={
+              (status === "recording" ? "Stop recording" : "Start recording") + " (Option+R)"
+            }
+            aria-keyshortcuts="Alt+R"
             className={
               status === "recording"
                 ? "h-20 w-20 animate-pulse rounded-full bg-red-600"
@@ -783,13 +814,27 @@ export function LogForm({
             }
           />
         )}
+        {/* Hidden on touch-sized screens, where there's no key to press. */}
+        {status !== "processing" && (
+          <p
+            aria-hidden
+            className="hidden text-xs text-neutral-400 dark:text-neutral-500 sm:block"
+          >
+            <kbd className="font-sans font-medium">⌥R</kbd>{" "}
+            {status === "recording" ? "to stop" : "to record"}
+          </p>
+        )}
         <button
           type="button"
           onClick={handleSave}
           disabled={status === "saving" || !fields.name.trim()}
+          aria-keyshortcuts="Alt+S"
           className="rounded-full bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 px-6 py-2.5 text-sm font-medium text-neutral-50 disabled:opacity-30"
         >
           {status === "saving" ? "Saving…" : "Save"}
+          <span aria-hidden className="ml-2 hidden text-xs opacity-50 sm:inline">
+            ⌥S
+          </span>
         </button>
       </div>
       </div>
