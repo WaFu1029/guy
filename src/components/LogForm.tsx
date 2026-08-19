@@ -451,15 +451,20 @@ export function LogForm({
   // Option+R toggles the recording, Option+S saves. Held in a ref so the
   // listener below always calls the current closures without rebinding.
   const shortcutsRef = useRef<{ toggleRecording: () => void; save: () => void }>(null!);
-  shortcutsRef.current = {
-    toggleRecording: () => {
-      if (status === "recording") stopAndExtract();
-      else if (status === "idle") startRecording();
-    },
-    save: () => {
-      if (status !== "saving" && fields.name.trim()) handleSave();
-    },
-  };
+  // Written in an effect rather than during render: a ref mutated mid-render
+  // can be torn by a render React throws away. No dependency array, so every
+  // render refreshes the closures the listener calls.
+  useEffect(() => {
+    shortcutsRef.current = {
+      toggleRecording: () => {
+        if (status === "recording") stopAndExtract();
+        else if (status === "idle") startRecording();
+      },
+      save: () => {
+        if (status !== "saving" && fields.name.trim()) handleSave();
+      },
+    };
+  });
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

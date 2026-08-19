@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { FollowUpActions } from "@/components/FollowUpActions";
 import { ProfileVoiceEdit } from "@/components/ProfileVoiceEdit";
 import { ContactChips } from "@/components/ContactChips";
 import { personContextLine } from "@/lib/personContext";
@@ -10,6 +9,8 @@ import { DeletePersonButton } from "@/components/DeletePersonButton";
 import { ProfileFields } from "@/components/ProfileFields";
 import { LeadHeatPicker } from "@/components/LeadHeatPicker";
 import { PersonNameEdit } from "@/components/PersonNameEdit";
+import { PersonFollowUps } from "@/components/PersonFollowUps";
+import { PersonGroupPicker } from "@/components/PersonGroupPicker";
 
 export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -34,7 +35,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
       .select("*")
       .eq("person_id", id)
       .order("due_at", { ascending: false }),
-    supabase.from("groups").select("name"),
+    supabase.from("groups").select("*").order("created_at", { ascending: true }),
     supabase.from("people").select("name, role, company, notes"),
     supabase
       .from("vocab_terms")
@@ -55,6 +56,12 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         <PersonNameEdit personId={person.id} name={person.name} />
 
         <LeadHeatPicker personId={person.id} heat={person.lead_heat} />
+
+        <PersonGroupPicker
+          personId={person.id}
+          groupId={person.group_id}
+          groups={groups ?? []}
+        />
 
         <ProfileFields person={person} />
 
@@ -97,25 +104,10 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           </div>
         )}
 
-        {followUps && followUps.length > 0 && (
-          <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-5">
-            <h2 className="mb-1 text-sm font-semibold text-neutral-900 dark:text-neutral-50">Follow-ups</h2>
-            <ul className="flex flex-col gap-2">
-              {followUps.map((f) => (
-                <li
-                  key={f.id}
-                  className="flex items-center justify-between rounded-xl bg-white dark:bg-neutral-800 px-3 py-2 text-sm"
-                >
-                  <p className="text-neutral-700 dark:text-neutral-200">
-                    Due {new Date(f.due_at).toLocaleString()}
-                    {f.notes ? ` — ${f.notes}` : ""}
-                  </p>
-                  {f.status === "pending" && <FollowUpActions followUpId={f.id} />}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-5">
+          <PersonFollowUps personId={person.id} followUps={followUps ?? []} />
+        </div>
+
         <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 px-5 py-5">
           <DeletePersonButton personId={person.id} personName={person.name} />
         </div>

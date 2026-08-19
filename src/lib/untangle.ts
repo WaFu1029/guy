@@ -257,7 +257,7 @@ export function untangle(
   const before = crossingsTouching(p, all);
   if (before === 0) return { ...empty, before, after: before };
 
-  const { xs, ys, incident, neighbors, fixed } = p;
+  const { xs, ys, radii, incident, neighbors, fixed } = p;
   const swap = (i: number, j: number) => {
     const tx = xs[i], ty = ys[i];
     xs[i] = xs[j]; ys[i] = ys[j];
@@ -284,7 +284,13 @@ export function untangle(
         const better =
           nowCrossings < wasCrossings ||
           (nowCrossings === wasCrossings && nowLength < wasLength * LENGTH_GAIN);
-        if (better) improved = true;
+        // Two slots are interchangeable only when the nodes claim the same
+        // space; a bigger node dropped into a tighter slot has to be checked.
+        // No bounds here — the swap stays inside the layout by construction.
+        const spaced =
+          radii[i] === radii[j] ||
+          (fits(p, i, xs[i], ys[i]) && fits(p, j, xs[j], ys[j]));
+        if (better && spaced) improved = true;
         else swap(i, j);
       }
     }

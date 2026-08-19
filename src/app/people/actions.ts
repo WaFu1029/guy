@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createGroup } from "@/app/groups/actions";
 import type { PersonUpdate } from "@/types/extraction";
@@ -79,6 +80,26 @@ export async function updateLeadHeat(personId: string, heat: number | null) {
     .update({ lead_heat: heat })
     .eq("id", personId);
   if (error) throw new Error(error.message);
+}
+
+// Move a person into a group, or out of every group when groupId is null.
+// The column is nullable and ON DELETE SET NULL, so "no group" is a real state
+// rather than an error.
+export async function updatePersonGroup(personId: string, groupId: string | null) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not signed in");
+
+  const { error } = await supabase
+    .from("people")
+    .update({ group_id: groupId })
+    .eq("id", personId);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/");
+  revalidatePath(`/people/${personId}`);
 }
 
 // Apply a voice-command patch to a person: field updates, note append/replace,
