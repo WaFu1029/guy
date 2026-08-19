@@ -108,6 +108,67 @@ const ZOOM_EXTENT: [number, number] = [0.25, 6];
 const CLICK_SLOP = 8;
 // How long the post-settle untangle takes to slide nodes into their new slots.
 const UNTANGLE_MS = 420;
+// The settled layout is kept per device, like the force sliders. Reopening the
+// page — or logging one more person — resumes from the arrangement that was
+// last tidied instead of re-deriving a fresh one, so the picture someone has
+// learned to read stays put.
+const LAYOUT_STORAGE_KEY = "guy-layout";
+// Ticks the off-screen retry runs before it is judged. d3 stops a live
+// simulation at roughly this many.
+const COLD_TICKS = 300;
+// Where a newcomer is dropped relative to the neighbor it came in with.
+const SEED_OFFSET = 70;
+
+type SavedLayout = {
+  // Which nodes the saved positions describe. A change here means people were
+  // added or removed, and the saved arrangement is only a starting point.
+  signature: string;
+  crossings: number;
+  positions: Record<string, [number, number]>;
+};
+
+function readStoredLayout(): SavedLayout | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SavedLayout>;
+    if (
+      typeof parsed?.signature !== "string" ||
+      typeof parsed?.crossings !== "number" ||
+      !parsed.positions ||
+      typeof parsed.positions !== "object"
+    ) {
+      return null;
+    }
+    const positions: Record<string, [number, number]> = {};
+    for (const [id, pair] of Object.entries(parsed.positions)) {
+      if (
+        Array.isArray(pair) &&
+        pair.length === 2 &&
+        Number.isFinite(pair[0]) &&
+        Number.isFinite(pair[1])
+      ) {
+        positions[id] = [pair[0], pair[1]];
+      }
+    }
+    return { signature: parsed.signature, crossings: parsed.crossings, positions };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredLayout(layout: SavedLayout) {
+  try {
+    window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layout));
+  } catch {
+    // Private mode or a full quota — the layout just won't survive a reload.
+  }
+}
+
+function signatureOf(ids: string[]): string {
+  return [...ids].sort().join("|");
+}
 
 function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max).trimEnd() + "…" : s;
@@ -297,13 +358,56 @@ export function ConnectionGraph({
   useEffect(() => {
     const nodes: SimNode[] = graph.nodes.map((n) => ({ ...n }));
     const links: SimLink[] = graph.links.map((l) => ({ ...l }));
+    const signature = signatureOf(nodes.map((n) => n.id));
+    const saved = readStoredLayout();
+
     // You is the anchor everything else is described relative to, so it holds
     // the center instead of being pushed around by the repulsion. A centered
     // hub is also what lets its spokes fan out without crossing each other.
-    const you = nodes.find((n) => n.kind === "you");
-    if (you) {
-      you.fx = viewW / 2;
-      you.fy = viewH / 2;
+    const anchorYou = (list: SimNode[]) => {
+      const you = list.find((n) => n.kind === "you");
+      if (you) {
+        you.fx = viewW / 2;
+        you.fy = viewH / 2;
+      }
+    };
+    anchorYou(nodes);
+
+    // Warm start: everyone who was on screen last time resumes where they were.
+    let restored = 0;
+    if (saved) {
+      for (const n of nodes) {
+        const at = saved.positions[n.id];
+        if (!at) continue;
+        n.x = at[0];
+        n.y = at[1];
+        restored++;
+      }
+    }
+    // A newcomer with no saved position is dropped beside the neighbor it
+    // arrived with rather than on d3's default spiral out at the origin — it
+    // starts in roughly the right neighborhood, so settling it back in barely
+    // disturbs anyone else.
+    if (restored > 0) {
+      const placed = new Map(nodes.filter((n) => saved?.positions[n.id]).map((n) => [n.id, n]));
+      const neighborsOf = new Map<string, string[]>();
+      for (const l of links) {
+        const a = l.source as string;
+        const b = l.target as string;
+        if (typeof a !== "string" || typeof b !== "string") continue;
+        (neighborsOf.get(a) ?? neighborsOf.set(a, []).get(a)!).push(b);
+        (neighborsOf.get(b) ?? neighborsOf.set(b, []).get(b)!).push(a);
+      }
+      let newcomer = 0;
+      for (const n of nodes) {
+        if (saved?.positions[n.id]) continue;
+        const anchor = (neighborsOf.get(n.id) ?? [])
+          .map((id) => placed.get(id))
+          .find((m) => m !== undefined);
+        const angle = (newcomer++ * 2 * Math.PI) / 5;
+        n.x = (anchor?.x ?? viewW / 2) + Math.cos(angle) * SEED_OFFSET;
+        n.y = (anchor?.y ?? viewH / 2) + Math.sin(angle) * SEED_OFFSET;
+      }
     }
 
     // The forces optimize distance, not readability. Once they cool, swap

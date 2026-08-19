@@ -18,6 +18,9 @@ const WHEN_OPTIONS = [
   { label: "3 months", hours: 2160 },
 ];
 
+const whenLabel = (hours: number) =>
+  WHEN_OPTIONS.find((o) => o.hours === hours)?.label.toLowerCase() ?? "later";
+
 const STATUS_LABEL: Record<FollowUp["status"], string> = {
   pending: "Due",
   snoozed: "Snoozed until",
@@ -30,9 +33,11 @@ const STATUS_LABEL: Record<FollowUp["status"], string> = {
 // is what tells you the option exists.
 export function PersonFollowUps({
   personId,
+  personName,
   followUps,
 }: {
   personId: string;
+  personName: string;
   followUps: FollowUp[];
 }) {
   const router = useRouter();
@@ -94,12 +99,23 @@ export function PersonFollowUps({
         </ul>
       ) : (
         <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
-          Nothing scheduled. Pick a time below and it shows up on your network
+          Nothing scheduled yet. Anything you schedule shows up on your network
           screen when it comes due.
         </p>
       )}
 
-      <div className="flex flex-wrap gap-2">
+      {/* The create flow is its own labelled block. Unlabelled chips under a
+          list of existing follow-ups read as filters, not as a form. */}
+      <div className="border-t border-neutral-200 pt-3 dark:border-neutral-700">
+        <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+          Schedule a new follow-up
+        </p>
+        <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+          Remind me about {personName} in…
+        </p>
+      </div>
+
+      <div className="mt-2 flex flex-wrap gap-2">
         {WHEN_OPTIONS.map((opt) => (
           <button
             key={opt.label}
@@ -117,25 +133,30 @@ export function PersonFollowUps({
         ))}
       </div>
 
-      {hours !== null && (
-        <div className="mt-2 flex flex-col gap-2">
-          <textarea
-            rows={2}
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="What's the follow-up about?"
-            className="w-full resize-y rounded-xl border-0 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:bg-neutral-800 dark:text-neutral-50 dark:placeholder:text-neutral-500 dark:focus:ring-neutral-300"
-          />
-          <button
-            type="button"
-            onClick={schedule}
-            disabled={busy}
-            className="self-start rounded-full bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-50 disabled:opacity-30 dark:bg-neutral-100 dark:text-neutral-900"
-          >
-            {busy ? "Scheduling…" : "Schedule follow-up"}
-          </button>
-        </div>
-      )}
+      {/* Both the note and the button stay visible, the button disabled until
+          a time is picked — a control that only appears after the right click
+          can't advertise what the click was for. */}
+      <div className="mt-2 flex flex-col gap-2">
+        <textarea
+          rows={2}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="What's the follow-up about? (optional)"
+          className="w-full resize-y rounded-xl border-0 bg-white px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:bg-neutral-800 dark:text-neutral-50 dark:placeholder:text-neutral-500 dark:focus:ring-neutral-300"
+        />
+        <button
+          type="button"
+          onClick={schedule}
+          disabled={busy || hours === null}
+          className="self-start rounded-full bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-50 disabled:opacity-30 dark:bg-neutral-100 dark:text-neutral-900"
+        >
+          {busy
+            ? "Scheduling…"
+            : hours === null
+              ? "Pick a time above"
+              : `Schedule for ${whenLabel(hours)}`}
+        </button>
+      </div>
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
     </div>

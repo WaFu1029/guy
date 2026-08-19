@@ -105,7 +105,11 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         )}
 
         <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-5">
-          <PersonFollowUps personId={person.id} followUps={followUps ?? []} />
+          <PersonFollowUps
+            personId={person.id}
+            personName={person.name}
+            followUps={followUps ?? []}
+          />
         </div>
 
         <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 px-5 py-5">
