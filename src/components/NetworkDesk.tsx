@@ -20,6 +20,7 @@ export function NetworkDesk({
   upcomingFollowUps,
   profile,
   orgColors,
+  photoUrls,
 }: {
   people: Person[];
   connections: Connection[];
@@ -29,6 +30,8 @@ export function NetworkDesk({
   profile: Profile | null;
   // Org hub colors keyed "school:columbia".
   orgColors: Record<string, string>;
+  // Signed photo URLs keyed by person id.
+  photoUrls: Record<string, string>;
 }) {
   const [pinnedIds, setPinnedIds] = useState<readonly string[]>([]);
   const orgs = useMemo(() => deriveOrgHubs(people, profile), [people, profile]);
@@ -47,6 +50,7 @@ export function NetworkDesk({
           groups={groups}
           profile={profile}
           orgColors={orgColors}
+          photoUrls={photoUrls}
           pinnedIds={pinnedIds}
           onPinnedIdsChange={setPinnedIds}
           // The side panel owns the cards from `lg` up.

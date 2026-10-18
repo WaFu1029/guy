@@ -42,6 +42,8 @@ type SimNode = SimulationNodeDatum & {
   // Group color; null renders the neutral white node.
   color: string | null;
   groupId: string | null;
+  // Signed photo URL — the node becomes the photo, ringed in the group color.
+  photo?: string | null;
 };
 
 type SimLink = {
@@ -178,6 +180,11 @@ function truncate(s: string, max: number): string {
 
 // Stable default: a fresh {} per render would rebuild the graph every render.
 const NO_ORG_COLORS: Record<string, string> = {};
+const NO_PHOTOS: Record<string, string> = {};
+// Ring around a photo node, in the group color.
+const PHOTO_RING = 3;
+// Spacing of the background dot grid, in graph units.
+const DOT_GAP = 18;
 
 export function ConnectionGraph({
   people,
@@ -185,6 +192,7 @@ export function ConnectionGraph({
   groups = [],
   profile = null,
   orgColors = NO_ORG_COLORS,
+  photoUrls = NO_PHOTOS,
   pinnedIds: controlledPinnedIds,
   onPinnedIdsChange,
   cardsClassName,
@@ -197,6 +205,8 @@ export function ConnectionGraph({
   profile?: Profile | null;
   // Org hub colors keyed "school:columbia", set on the org's page.
   orgColors?: Record<string, string>;
+  // Signed photo URLs keyed by person id.
+  photoUrls?: Record<string, string>;
   // Pins are optionally controlled: the desktop layout owns them so the
   // detail cards can render in the right-hand column instead of over the
   // graph. Left uncontrolled, the graph keeps its own pin state.
@@ -310,6 +320,7 @@ export function ConnectionGraph({
         sub: [p.role, p.company].filter(Boolean).join(" · ") || null,
         color: groupOf(p)?.color ?? null,
         groupId: p.group_id,
+        photo: photoUrls[p.id] ?? null,
       })),
     ];
     const links: SimLink[] = connections.map((c) => ({
@@ -337,7 +348,7 @@ export function ConnectionGraph({
 
     return { nodes, links, orgs };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [people, connections, groups, profile, orgColors]);
+  }, [people, connections, groups, profile, orgColors, photoUrls]);
 
   // Resolve pins into cards — a pin is either a person or a derived org hub.
   const pinnedEntries = resolvePins(pinnedIds, people, graph.orgs);
@@ -710,6 +721,21 @@ export function ConnectionGraph({
           onSvgUp(e);
         }}
       >
+        {/* Dot grid. The pattern rides the zoom transform, so the canvas pans
+            and zooms with the graph. The rect overshoots the viewBox because
+            the letterboxed svg shows space beyond it. */}
+        <defs>
+          <pattern
+            id="graph-dots"
+            width={DOT_GAP}
+            height={DOT_GAP}
+            patternUnits="userSpaceOnUse"
+            patternTransform={zoomTransform.toString()}
+          >
+            <circle cx={DOT_GAP / 2} cy={DOT_GAP / 2} r={1} fill="var(--g-dot)" />
+          </pattern>
+        </defs>
+        <rect x={-5000} y={-5000} width={10000} height={10000} fill="url(#graph-dots)" />
         <g transform={zoomTransform.toString()}>
           {simLinks.map((l, i) => {
             const s = l.source as SimNode;
@@ -796,6 +822,47 @@ export function ConnectionGraph({
                   onPointerDown={onNodeDown(n.id)}
                 />
               ) : (
+                n.photo ? (
+                  // Photo node: the circle draws the group-color ring and
+                  // takes the pointer; the clipped photo sits inside the ring.
+                  <>
+                    {pinnedIds.includes(n.id) && (
+                      <circle
+                        cx={n.x}
+                        cy={n.y}
+                        r={NODE_RADIUS.person + PHOTO_RING + 2}
+                        fill="none"
+                        stroke="var(--g-selected)"
+                        strokeWidth={1.5}
+                        className="pointer-events-none"
+                      />
+                    )}
+                    <circle
+                      cx={n.x}
+                      cy={n.y}
+                      r={NODE_RADIUS.person}
+                      fill="var(--g-person-fill)"
+                      stroke={n.color ?? "var(--g-person-stroke)"}
+                      strokeWidth={PHOTO_RING}
+                      data-graph-node
+                      className="cursor-pointer"
+                      onPointerDown={onNodeDown(n.id)}
+                    />
+                    <clipPath id={`photo-clip-${n.id}`}>
+                      <circle cx={n.x} cy={n.y} r={NODE_RADIUS.person - PHOTO_RING / 2} />
+                    </clipPath>
+                    <image
+                      href={n.photo}
+                      x={(n.x ?? 0) - NODE_RADIUS.person}
+                      y={(n.y ?? 0) - NODE_RADIUS.person}
+                      width={NODE_RADIUS.person * 2}
+                      height={NODE_RADIUS.person * 2}
+                      preserveAspectRatio="xMidYMid slice"
+                      clipPath={`url(#photo-clip-${n.id})`}
+                      className="pointer-events-none"
+                    />
+                  </>
+                ) : (
                 <circle
                   cx={n.x}
                   cy={n.y}
@@ -807,6 +874,7 @@ export function ConnectionGraph({
                   className={n.kind === "person" ? "cursor-pointer" : "cursor-grab"}
                   onPointerDown={onNodeDown(n.id)}
                 />
+                )
               )}
               <text
                 x={n.x}
@@ -850,7 +918,7 @@ export function ConnectionGraph({
                   {truncate(n.sub, 28)}
                 </text>
               )}
-              {n.kind === "person" && (
+              {n.kind === "person" && !n.photo && (
                 <text
                   x={n.x}
                   y={(n.y ?? 0) + 4}

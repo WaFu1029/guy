@@ -300,7 +300,7 @@ const FILL_GAPS_TOOL = {
       role: {
         type: "string",
         description:
-          "Their job title when the notes state it outright — or, with no job given, their relationship to the user when it's personal: met_at 'my sister' → 'Sister'; 'my mom' → 'Mom'; 'neighbor' → 'Neighbor'. Not for professional origins like 'SF demo day'.",
+          "Their title or position when the notes state it outright — a job, or a position in a club or organization ('co-president of Core' → 'Co-president of Core'). Only with no position at all, their relationship to the user when it's personal: met_at 'my sister' → 'Sister'; 'my mom' → 'Mom'; 'neighbor' → 'Neighbor'. Not for professional origins like 'SF demo day'.",
       },
       company: {
         type: "string",

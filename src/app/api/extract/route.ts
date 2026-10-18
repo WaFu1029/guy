@@ -17,7 +17,7 @@ const RECORD_CONNECTION_TOOL = {
       role: {
         type: "string",
         description:
-          "Their job title or role, if mentioned — current or former ('former president', 'ex-Google PM'). Put it here even when it's also worth a line in context. When no job is mentioned but they're personal to the user — family, a friend, a neighbor — their relationship is their role: 'Sister', 'Mom', 'Neighbor', 'College roommate'.",
+          "Their title or position, if mentioned — a job, current or former ('former president', 'ex-Google PM'), or any position they hold in a club, team, or organization ('Co-president of Core', 'Captain of the rowing team'). A position always wins over a relationship: 'she's a friend, co-president of Core' → 'Co-president of Core'. Put it here even when it's also worth a line in context. Only when they hold no position at all and they're personal to the user — family, a friend, a neighbor — is their relationship the role: 'Sister', 'Mom', 'Neighbor'.",
       },
       company: {
         type: "string",
@@ -89,7 +89,7 @@ const RECORD_CONNECTION_TOOL = {
       group_name: {
         type: "string",
         description:
-          "The group the user asked to put this person in, if they said one. Use the exact name from the user's existing groups list when it matches; a name not on the list is fine too — a new group will be created.",
+          "The group the user explicitly asked to file this person under in this app ('put her in Friends', 'add him to my Investors group'). Use the exact name from the user's existing groups list when it matches; a name not on the list is fine too — a new group will be created. Belonging to a club, team, school, or company ('she's part of CORE') is NOT a group request — that goes in role/context. Omit unless the user asked.",
       },
       relationship_type: {
         type: "string",

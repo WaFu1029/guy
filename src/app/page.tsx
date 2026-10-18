@@ -33,6 +33,20 @@ export default async function HomePage() {
   ]);
   const orgColors = Object.fromEntries((orgStyles ?? []).map((s) => [s.org_key, s.color]));
 
+  // Photos live in a private bucket: sign every person's photo in one call,
+  // keyed by person id for the graph's photo nodes.
+  const withPhotos = (people ?? []).filter((p) => p.photo_path);
+  const photoUrls: Record<string, string> = {};
+  if (withPhotos.length > 0) {
+    const { data: signed } = await supabase.storage
+      .from("person-photos")
+      .createSignedUrls(withPhotos.map((p) => p.photo_path!), 60 * 60);
+    for (const s of signed ?? []) {
+      const person = withPhotos.find((p) => p.photo_path === s.path);
+      if (person && s.signedUrl) photoUrls[person.id] = s.signedUrl;
+    }
+  }
+
   const pending: DueFollowUp[] = (pendingFollowUps ?? []).map((f) => ({
     ...f,
     person_name: (f as unknown as { people: { name: string } }).people?.name ?? "Someone",
@@ -56,6 +70,7 @@ export default async function HomePage() {
           upcomingFollowUps={upcomingFollowUps}
           profile={profile ?? null}
           orgColors={orgColors}
+          photoUrls={photoUrls}
         />
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-3xl bg-neutral-100 dark:bg-neutral-900 p-8 text-center">
