@@ -4,6 +4,8 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { applyPersonUpdate } from "@/app/people/actions";
 import type { PersonUpdate } from "@/types/extraction";
+import type { FollowUp } from "@/types/database";
+import { toLocalIso } from "@/lib/localTime";
 
 type Status = "idle" | "recording" | "processing" | "applying";
 
@@ -17,6 +19,7 @@ export function ProfileVoiceEdit({
   groupNames = [],
   peopleNames = [],
   vocabulary = [],
+  followUps = [],
 }: {
   personId: string;
   personName: string;
@@ -25,6 +28,8 @@ export function ProfileVoiceEdit({
   peopleNames?: string[];
   // Spellings the extractor snaps near-misses onto — see the account page.
   vocabulary?: string[];
+  // Pending follow-ups, so "move it to Friday" can edit one.
+  followUps?: FollowUp[];
 }) {
   const router = useRouter();
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
@@ -92,6 +97,14 @@ export function ProfileVoiceEdit({
           groups: groupNames,
           people: peopleNames,
           vocabulary,
+          // Local times with offset, so "Friday at 3pm" lands in the
+          // user's timezone rather than the server's.
+          followUps: followUps.map((f) => ({
+            id: f.id,
+            due: toLocalIso(new Date(f.due_at)),
+            notes: f.notes,
+          })),
+          now: toLocalIso(new Date()),
         }),
       });
       if (!res.ok) {

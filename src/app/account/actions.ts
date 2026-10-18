@@ -35,9 +35,17 @@ export async function deletePerson(personId: string) {
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Not signed in");
 
+  const { data: doomed } = await supabase
+    .from("people")
+    .select("photo_path")
+    .eq("id", personId)
+    .maybeSingle();
+
   // RLS scopes the delete; connections and follow_ups cascade via FKs.
   const { error } = await supabase.from("people").delete().eq("id", personId);
   if (error) throw new Error(error.message);
+  // Storage doesn't cascade — drop the photo file too.
+  if (doomed?.photo_path) await supabase.storage.from("person-photos").remove([doomed.photo_path]);
 
   // The deleted person may have been someone else's only link into the graph
   // (e.g. "introduced by"). Re-anchor any now-orphaned people to You so no
@@ -79,6 +87,13 @@ export async function deleteAllData() {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) throw new Error("Not signed in");
+
+  // Photos live in storage, which nothing cascades into — clear the user's
+  // folder before the rows that point at it go.
+  const { data: photos } = await supabase.storage.from("person-photos").list(user.id, { limit: 1000 });
+  if (photos?.length) {
+    await supabase.storage.from("person-photos").remove(photos.map((f) => `${user.id}/${f.name}`));
+  }
 
   // people cascades connections + follow_ups; groups go separately.
   const { error: peopleError } = await supabase.from("people").delete().eq("user_id", user.id);

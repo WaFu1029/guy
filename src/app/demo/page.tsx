@@ -23,6 +23,7 @@ function person(id: string, name: string, role: string | null, company: string |
     instagram: null,
     twitter: null,
     raw_transcript: null,
+    photo_path: null,
     lead_heat: null,
     met_at: "Demo Summit",
     met_date: today,

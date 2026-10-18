@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createFollowUp } from "@/app/follow-ups/actions";
+import { createFollowUp, updateFollowUp } from "@/app/follow-ups/actions";
+import { toLocalInput } from "@/lib/localTime";
 import { FollowUpActions } from "@/components/FollowUpActions";
 import type { FollowUp } from "@/types/database";
 
@@ -56,6 +57,39 @@ export function PersonFollowUps({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Inline editor for one follow-up at a time.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDue, setEditDue] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+
+  const startEdit = (f: FollowUp) => {
+    setEditingId(f.id);
+    setEditDue(toLocalInput(f.due_at));
+    setEditNotes(f.notes ?? "");
+    setError(null);
+  };
+
+  const saveEdit = async () => {
+    if (!editingId || !editDue) return;
+    setEditBusy(true);
+    setError(null);
+    try {
+      // datetime-local is local wall time; Date parses it as such.
+      const updated = await updateFollowUp(editingId, {
+        dueAt: new Date(editDue).toISOString(),
+        notes: editNotes,
+      });
+      setItems((cur) => cur.map((f) => (f.id === updated.id ? updated : f)));
+      setEditingId(null);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update");
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
   const schedule = async () => {
     if (hours === null) return;
     setBusy(true);
@@ -82,7 +116,41 @@ export function PersonFollowUps({
 
       {items.length > 0 ? (
         <ul className="mb-3 flex flex-col gap-2">
-          {items.map((f) => (
+          {items.map((f) =>
+            editingId === f.id ? (
+              <li key={f.id} className="flex flex-col gap-2 rounded-xl bg-white px-3 py-3 text-sm dark:bg-neutral-800">
+                <input
+                  type="datetime-local"
+                  value={editDue}
+                  onChange={(e) => setEditDue(e.target.value)}
+                  className="w-fit rounded-lg bg-neutral-100 px-2 py-1 text-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:bg-neutral-700 dark:text-neutral-50 dark:focus:ring-neutral-300"
+                />
+                <textarea
+                  rows={2}
+                  value={editNotes}
+                  onChange={(e) => setEditNotes(e.target.value)}
+                  placeholder="What's the follow-up about? (optional)"
+                  className="w-full resize-y rounded-lg bg-neutral-100 px-2 py-1.5 text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:bg-neutral-700 dark:text-neutral-50 dark:placeholder:text-neutral-500 dark:focus:ring-neutral-300"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={editBusy || !editDue}
+                    onClick={saveEdit}
+                    className="rounded-full bg-neutral-900 px-4 py-1.5 text-xs font-medium text-neutral-50 enabled:hover:bg-neutral-700 disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900 dark:enabled:hover:bg-neutral-300"
+                  >
+                    {editBusy ? "Saving…" : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingId(null)}
+                    className="rounded-full px-4 py-1.5 text-xs text-neutral-600 ring-1 ring-neutral-300 hover:bg-neutral-100 dark:text-neutral-300 dark:ring-neutral-600 dark:hover:bg-neutral-700"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </li>
+            ) : (
             <li
               key={f.id}
               className="flex items-center justify-between gap-3 rounded-xl bg-white dark:bg-neutral-800 px-3 py-2 text-sm"
@@ -97,9 +165,26 @@ export function PersonFollowUps({
                   </p>
                 )}
               </div>
-              {f.status === "pending" && <FollowUpActions followUpId={f.id} />}
+              <div className="flex shrink-0 items-center gap-2">
+                {(f.status === "pending" || f.status === "snoozed") && (
+                  <button
+                    type="button"
+                    onClick={() => startEdit(f)}
+                    className="rounded-full px-3 py-1 text-xs text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-300 dark:hover:bg-neutral-700 dark:hover:text-neutral-50"
+                  >
+                    Edit
+                  </button>
+                )}
+                {f.status === "pending" && (
+                  <FollowUpActions
+                    followUpId={f.id}
+                    calendar={{ personId, personName, dueAt: f.due_at, notes: f.notes }}
+                  />
+                )}
+              </div>
             </li>
-          ))}
+            )
+          )}
         </ul>
       ) : (
         <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">

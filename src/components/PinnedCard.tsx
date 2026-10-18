@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ContactChips } from "@/components/ContactChips";
-import type { PinnedEntry } from "@/lib/orgHubs";
+import { orgHref, orgStyleKey, type PinnedEntry } from "@/lib/orgHubs";
 import type { Group } from "@/types/database";
 
 // One detail card for a pinned node — a person or a derived org hub. The same
@@ -11,11 +11,13 @@ import type { Group } from "@/types/database";
 export function PinnedCard({
   entry,
   groups,
+  orgColors = {},
   onUnpin,
   className,
 }: {
   entry: PinnedEntry;
   groups: Group[];
+  orgColors?: Record<string, string>;
   onUnpin: (id: string) => void;
   className?: string;
 }) {
@@ -25,7 +27,14 @@ export function PinnedCard({
       <div className={className}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-base font-bold text-neutral-900 dark:text-neutral-50">
+            <p className="flex items-center gap-2 text-base font-bold text-neutral-900 dark:text-neutral-50">
+              {orgColors[orgStyleKey(org.id)] && (
+                <span
+                  aria-hidden
+                  className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                  style={{ backgroundColor: orgColors[orgStyleKey(org.id)] }}
+                />
+              )}
               {org.label}
             </p>
             <p className="text-sm text-neutral-500 dark:text-neutral-400">
@@ -72,6 +81,12 @@ export function PinnedCard({
             );
           })}
         </div>
+        <Link
+          href={orgHref(org.id)}
+          className="mt-3 inline-block text-sm text-neutral-900 underline underline-offset-2 dark:text-neutral-50"
+        >
+          Open page →
+        </Link>
       </div>
     );
   }

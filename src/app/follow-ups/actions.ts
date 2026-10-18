@@ -60,3 +60,35 @@ export async function createFollowUp(
   revalidatePath(`/people/${personId}`);
   return data as FollowUp;
 }
+
+// Edit an existing follow-up from the profile — by hand or by voice. A new due
+// time puts a snoozed follow-up back to pending; `action` closes it out.
+export async function updateFollowUp(
+  followUpId: string,
+  changes: { dueAt?: string; notes?: string | null; action?: "complete" | "dismiss" }
+): Promise<FollowUp> {
+  const supabase = await createClient();
+  const patch: Partial<FollowUp> = {};
+  if (changes.dueAt !== undefined) {
+    const due = new Date(changes.dueAt);
+    if (Number.isNaN(due.getTime())) throw new Error("That date didn't make sense");
+    patch.due_at = due.toISOString();
+    patch.status = "pending";
+  }
+  if (changes.notes !== undefined) patch.notes = changes.notes?.trim() || null;
+  if (changes.action === "complete") patch.status = "completed";
+  if (changes.action === "dismiss") patch.status = "dismissed";
+  if (Object.keys(patch).length === 0) throw new Error("Nothing to change");
+
+  const { data, error } = await supabase
+    .from("follow_ups")
+    .update(patch)
+    .eq("id", followUpId)
+    .select()
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "Failed to update follow-up");
+
+  revalidatePath("/");
+  revalidatePath(`/people/${data.person_id}`);
+  return data as FollowUp;
+}

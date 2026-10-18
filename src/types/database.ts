@@ -41,6 +41,8 @@ export type Person = {
   met_at: string | null;
   // 1 (cold) … 5 (hot); null when unrated.
   lead_heat: number | null;
+  // Path in the private person-photos bucket; null when no photo.
+  photo_path: string | null;
   met_date: string;
   created_at: string;
   updated_at: string;
@@ -64,6 +66,14 @@ export type Connection = {
   relationship_type: RelationshipType;
   label: string | null;
   created_at: string;
+};
+
+// The user's color for a derived org hub, keyed "school:columbia" etc.
+export type OrgStyle = {
+  user_id: string;
+  org_key: string;
+  color: string;
+  updated_at: string;
 };
 
 export type FollowUp = {
@@ -123,6 +133,12 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      org_styles: {
+        Row: OrgStyle;
+        Insert: Partial<OrgStyle> & { user_id: string; org_key: string; color: string };
+        Update: Partial<OrgStyle>;
+        Relationships: [];
       };
       follow_ups: {
         Row: FollowUp;

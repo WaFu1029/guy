@@ -24,7 +24,7 @@ import {
   type ZoomTransform,
 } from "d3-zoom";
 import { PinnedCard } from "@/components/PinnedCard";
-import { deriveOrgHubs, resolvePins } from "@/lib/orgHubs";
+import { deriveOrgHubs, orgStyleKey, resolvePins } from "@/lib/orgHubs";
 import { untangle } from "@/lib/untangle";
 import type { Person, Connection, Group, Profile } from "@/types/database";
 
@@ -118,6 +118,8 @@ const LAYOUT_STORAGE_KEY = "guy-layout";
 const COLD_TICKS = 300;
 // Where a newcomer is dropped relative to the neighbor it came in with.
 const SEED_OFFSET = 70;
+// How far a person↔person edge bows out, as a fraction of its length.
+const EDGE_BEND = 0.25;
 
 type SavedLayout = {
   // Which nodes the saved positions describe. A change here means people were
@@ -174,11 +176,15 @@ function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max).trimEnd() + "…" : s;
 }
 
+// Stable default: a fresh {} per render would rebuild the graph every render.
+const NO_ORG_COLORS: Record<string, string> = {};
+
 export function ConnectionGraph({
   people,
   connections,
   groups = [],
   profile = null,
+  orgColors = NO_ORG_COLORS,
   pinnedIds: controlledPinnedIds,
   onPinnedIdsChange,
   cardsClassName,
@@ -189,6 +195,8 @@ export function ConnectionGraph({
   // The user's own details: names the You node and puts You inside the org
   // hubs for the school/company they share with people in the graph.
   profile?: Profile | null;
+  // Org hub colors keyed "school:columbia", set on the org's page.
+  orgColors?: Record<string, string>;
   // Pins are optionally controlled: the desktop layout owns them so the
   // detail cards can render in the right-hand column instead of over the
   // graph. Left uncontrolled, the graph keeps its own pin state.
@@ -319,7 +327,7 @@ export function ConnectionGraph({
         kind: "org",
         label: bucket.label,
         sub: bucket.kind === "school" ? "School" : "Company",
-        color: null,
+        color: orgColors[orgStyleKey(id)] ?? null,
         groupId: null,
       });
       for (const member of bucket.members) {
@@ -329,7 +337,7 @@ export function ConnectionGraph({
 
     return { nodes, links, orgs };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [people, connections, groups, profile]);
+  }, [people, connections, groups, profile, orgColors]);
 
   // Resolve pins into cards — a pin is either a person or a derived org hub.
   const pinnedEntries = resolvePins(pinnedIds, people, graph.orgs);
@@ -707,8 +715,21 @@ export function ConnectionGraph({
             const s = l.source as SimNode;
             const t = l.target as SimNode;
             if (typeof s === "string" || typeof t === "string") return null;
-            const mx = ((s.x ?? 0) + (t.x ?? 0)) / 2;
-            const my = ((s.y ?? 0) + (t.y ?? 0)) / 2;
+            const sx = s.x ?? 0;
+            const sy = s.y ?? 0;
+            const tx = t.x ?? 0;
+            const ty = t.y ?? 0;
+            // Person↔person edges bow out to one side. The forces often leave
+            // two linked people on a straight line through You, and a straight
+            // edge between them would be drawn exactly over the two spokes.
+            const curved = s.kind === "person" && t.kind === "person";
+            const bend = curved ? Math.hypot(tx - sx, ty - sy) * EDGE_BEND : 0;
+            const len = Math.hypot(tx - sx, ty - sy) || 1;
+            const cx = (sx + tx) / 2 + (-(ty - sy) / len) * bend;
+            const cy = (sy + ty) / 2 + ((tx - sx) / len) * bend;
+            // Quadratic midpoint sits halfway between the chord and the control.
+            const mx = curved ? ((sx + tx) / 2 + cx) / 2 : (sx + tx) / 2;
+            const my = curved ? ((sy + ty) / 2 + cy) / 2 : (sy + ty) / 2;
             return (
               <g
                 key={`${s.id}→${t.id}:${i}`}
@@ -717,17 +738,26 @@ export function ConnectionGraph({
                   transition: "opacity 200ms ease",
                 }}
               >
-                <line
-                  x1={s.x}
-                  y1={s.y}
-                  x2={t.x}
-                  y2={t.y}
-                  stroke="var(--g-edge)"
-                  strokeWidth={1}
-                  // Spokes to derived org hubs render dashed — they're a
-                  // view, not a logged connection.
-                  strokeDasharray={t.kind === "org" || s.kind === "org" ? "4 3" : undefined}
-                />
+                {curved ? (
+                  <path
+                    d={`M${sx},${sy} Q${cx},${cy} ${tx},${ty}`}
+                    fill="none"
+                    stroke="var(--g-edge)"
+                    strokeWidth={1}
+                  />
+                ) : (
+                  <line
+                    x1={sx}
+                    y1={sy}
+                    x2={tx}
+                    y2={ty}
+                    stroke="var(--g-edge)"
+                    strokeWidth={1}
+                    // Spokes to derived org hubs render dashed — they're a
+                    // view, not a logged connection.
+                    strokeDasharray={t.kind === "org" || s.kind === "org" ? "4 3" : undefined}
+                  />
+                )}
                 {/* Relationship labels stay hidden until an endpoint is
                     pinned — the default view shows just the wiring. */}
                 {l.label && (pinnedIds.includes(s.id) || pinnedIds.includes(t.id)) && (
@@ -758,8 +788,8 @@ export function ConnectionGraph({
                   width={NODE_RADIUS.org * 2}
                   height={NODE_RADIUS.org * 2}
                   rx={8}
-                  fill="var(--g-org-fill)"
-                  stroke={pinnedIds.includes(n.id) ? "#737373" : "var(--g-org-fill)"}
+                  fill={n.color ?? "var(--g-org-fill)"}
+                  stroke={pinnedIds.includes(n.id) ? "#737373" : (n.color ?? "var(--g-org-fill)")}
                   strokeWidth={pinnedIds.includes(n.id) ? 3 : 1}
                   data-graph-node
                   className="cursor-pointer"
@@ -842,7 +872,7 @@ export function ConnectionGraph({
                   x={n.x}
                   y={(n.y ?? 0) + 4}
                   textAnchor="middle"
-                  fill="var(--g-org-text)"
+                  fill={n.color ? "#171717" : "var(--g-org-text)"}
                   fontSize={12}
                   fontWeight={700}
                   className="pointer-events-none"
@@ -986,6 +1016,7 @@ export function ConnectionGraph({
               key={entry.type === "org" ? entry.org.id : entry.person.id}
               entry={entry}
               groups={groups}
+              orgColors={orgColors}
               onUnpin={togglePin}
               className="w-full shrink-0 snap-center rounded-t-2xl bg-white dark:bg-neutral-800 p-4 shadow-lg"
             />

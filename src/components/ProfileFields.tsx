@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { updatePersonFields } from "@/app/people/actions";
+import { inferPersonGaps, updatePersonFields } from "@/app/people/actions";
 import type { Person } from "@/types/database";
 
 type Editable = {
@@ -49,16 +49,35 @@ export function ProfileFields({ person }: { person: Person }) {
   const [saved, setSaved] = useState<Editable>(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // What Guy filled in after the last save, shown as a one-line note.
+  const [inferred, setInferred] = useState<string | null>(null);
 
   const dirty = ROWS.some((r) => fields[r.key] !== saved[r.key]) || fields.notes !== saved.notes;
 
   const save = async () => {
     setBusy(true);
     setError(null);
+    setInferred(null);
     try {
       await updatePersonFields(person.id, fields);
       setSaved(fields);
       router.refresh();
+      // Then let Claude fill any empty field the edit implies. Runs after the
+      // save so a slow or failed inference never holds up the user's change.
+      const filledValues = await inferPersonGaps(person.id);
+      const filled = Object.keys(filledValues) as (keyof typeof filledValues)[];
+      if (filled.length > 0) {
+        // Fold the fills into both copies so they show, and so the next save
+        // doesn't send these fields back empty and wipe them.
+        setFields((f) => ({ ...f, ...filledValues }));
+        setSaved((f) => ({ ...f, ...filledValues }));
+        setInferred(
+          "Guy filled in " +
+            filled.map((k) => ROWS.find((r) => r.key === k)?.label ?? k).join(", ") +
+            "."
+        );
+        router.refresh();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");
     } finally {
@@ -94,6 +113,7 @@ export function ProfileFields({ person }: { person: Person }) {
       </div>
 
       {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {inferred && <p className="mt-2 text-sm text-emerald-700">{inferred}</p>}
       {dirty && (
         <button
           type="button"

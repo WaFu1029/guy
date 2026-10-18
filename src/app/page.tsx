@@ -15,8 +15,9 @@ export default async function HomePage() {
     { data: people },
     { data: connections },
     { data: groups },
-    { data: dueFollowUps },
+    { data: pendingFollowUps },
     { data: profile },
+    { data: orgStyles },
   ] = await Promise.all([
     supabase.from("people").select("*").order("created_at", { ascending: false }),
     supabase.from("connections").select("*"),
@@ -25,16 +26,21 @@ export default async function HomePage() {
       .from("follow_ups")
       .select("*, people(name)")
       .eq("status", "pending")
-      .lte("due_at", new Date().toISOString())
       .order("due_at", { ascending: true }),
     // The user's own details — absent until they fill them in on /account.
     supabase.from("profiles").select("*").maybeSingle(),
+    supabase.from("org_styles").select("org_key, color"),
   ]);
+  const orgColors = Object.fromEntries((orgStyles ?? []).map((s) => [s.org_key, s.color]));
 
-  const followUps: DueFollowUp[] = (dueFollowUps ?? []).map((f) => ({
+  const pending: DueFollowUp[] = (pendingFollowUps ?? []).map((f) => ({
     ...f,
     person_name: (f as unknown as { people: { name: string } }).people?.name ?? "Someone",
   }));
+  // Split here rather than in the panel so server and client agree on "now".
+  const now = new Date().toISOString();
+  const followUps = pending.filter((f) => f.due_at <= now);
+  const upcomingFollowUps = pending.filter((f) => f.due_at > now);
 
   return (
     // TopNav is 3.75rem tall (pt-6 + text-xl line + pb-2); the page takes
@@ -47,7 +53,9 @@ export default async function HomePage() {
           connections={connections ?? []}
           groups={groups ?? []}
           followUps={followUps}
+          upcomingFollowUps={upcomingFollowUps}
           profile={profile ?? null}
+          orgColors={orgColors}
         />
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-3xl bg-neutral-100 dark:bg-neutral-900 p-8 text-center">

@@ -16,7 +16,8 @@ const RECORD_CONNECTION_TOOL = {
       },
       role: {
         type: "string",
-        description: "Their job title or role, if mentioned.",
+        description:
+          "Their job title or role, if mentioned — current or former ('former president', 'ex-Google PM'). Put it here even when it's also worth a line in context. When no job is mentioned but they're personal to the user — family, a friend, a neighbor — their relationship is their role: 'Sister', 'Mom', 'Neighbor', 'College roommate'.",
       },
       company: {
         type: "string",
@@ -31,7 +32,7 @@ const RECORD_CONNECTION_TOOL = {
       met_at: {
         type: "string",
         description:
-          "How or why the user knows this person — the event, place, or origin of the relationship (e.g. 'SF demo day', 'high school', 'introduced by Maya'). Any 'I know her from X' statement belongs here.",
+          "How or why the user knows this person — the event, place, or origin of the relationship (e.g. 'SF demo day', 'high school', 'introduced by Maya', 'neighbor'). Any 'I know her from X' or 'he's my neighbor' statement belongs here. Family and other personal ties count too: 'she's my sister' → 'my sister' — set this even when the same relationship also goes in role. Only what the transcript says — never assume a networking event or any other default; omit when unstated.",
       },
       context: {
         type: "string",
@@ -165,7 +166,7 @@ export async function POST(request: Request) {
       messages: [
         {
           role: "user",
-          content: `Here is a voice note the user recorded right after meeting someone at a networking event. Extract the connection details.
+          content: `Here is a voice note the user recorded about someone they know or just met. Extract the connection details.
 
   Only include fields the transcript (or draft) actually supports. Never output placeholder values like "<UNKNOWN>" or "N/A" — omit the field instead. If the draft already has notes, the context field must contain ONLY new information not present in them — never restate what the draft already says.
 
@@ -205,6 +206,11 @@ A correction REPLACES what the draft holds — output only the corrected value, 
   // Placeholder scrub — a forced tool call sometimes fabricates one anyway.
   if (extracted.name && /unknown|n\/a/i.test(extracted.name)) {
     extracted.name = "";
+  }
+  // The old prompt framed every note as a networking event and the model
+  // still reaches for it as a default — drop it unless the user said so.
+  if (extracted.met_at && /networking event/i.test(extracted.met_at) && !/network/i.test(transcript)) {
+    delete extracted.met_at;
   }
   // A partial transcript legitimately has no name yet — only the final pass
   // treats a nameless extraction as a failure.

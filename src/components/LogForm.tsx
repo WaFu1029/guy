@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { saveConnection } from "@/app/log/actions";
+import { setPersonPhoto } from "@/app/people/actions";
+import { PhotoCapture } from "@/components/PhotoCapture";
 import { createGroup } from "@/app/groups/actions";
 import type { ExtractedConnection } from "@/types/extraction";
 import { PersonSuggestInput, type SuggestPerson } from "@/components/PersonSuggestInput";
@@ -32,8 +34,13 @@ function nearestFollowUp(hours: number): number {
   return offered.reduce((best, h) => (Math.abs(h - hours) < Math.abs(best - hours) ? h : best));
 }
 
+// Every new contact starts warm; a spoken or tapped rating overrides it, and
+// tapping the active rating still clears it to unrated.
+const DEFAULT_LEAD_HEAT = 3;
+
 type Fields = {
   name: string;
+  role: string;
   alsoKnows: string;
   whatTheyDo: string;
   howTheyHelp: string;
@@ -48,6 +55,7 @@ type Fields = {
 
 const EMPTY_FIELDS: Fields = {
   name: "",
+  role: "",
   alsoKnows: "",
   whatTheyDo: "",
   howTheyHelp: "",
@@ -63,6 +71,27 @@ const EMPTY_FIELDS: Fields = {
 // The Log tab: a plain form plus the big record circle. Speaking fills the
 // fields via /api/extract; everything stays editable by hand, and typing
 // without recording works too.
+// Wraps a field so it can glow when extraction fills it: a sunset-gradient
+// ring and soft halo behind the input that sweeps and fades. Keyed on the
+// nonce so each bump remounts the halo (replaying the animation) without
+// touching the input itself — focus and caret stay put.
+function Glow({
+  nonce,
+  className,
+  children,
+}: {
+  nonce: number | undefined;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={"relative isolate flex flex-col " + (className ?? "")}>
+      {nonce ? <span key={nonce} aria-hidden className="guy-glow" /> : null}
+      {children}
+    </div>
+  );
+}
+
 export function LogForm({
   groups: initialGroups,
   peopleContext = [],
@@ -88,14 +117,29 @@ export function LogForm({
   const transcriptRef = useRef("");
   const [status, setStatus] = useState<Status>("idle");
   const [fields, setFields] = useState<Fields>(EMPTY_FIELDS);
-  // Kept from extraction even though the form doesn't show it — the graph and
-  // person page still use role.
-  const [role, setRole] = useState("");
-  const [leadHeat, setLeadHeat] = useState<number | undefined>(undefined);
+  // Per-field counter, bumped whenever extraction fills that field; each bump
+  // replays the glow.
+  const [flash, setFlash] = useState<Partial<Record<keyof Fields, number>>>({});
+  const [leadHeat, setLeadHeat] = useState<number | undefined>(DEFAULT_LEAD_HEAT);
   const [followUpHours, setFollowUpHours] = useState<number | undefined>(undefined);
   const [followUpAbout, setFollowUpAbout] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  // Photo taken during capture; uploaded once the person exists.
+  const [photo, setPhoto] = useState<{ blob: Blob; url: string } | null>(null);
+  const [capturingPhoto, setCapturingPhoto] = useState(false);
+  const takePhoto = (blob: Blob) => {
+    setCapturingPhoto(false);
+    setPhoto((cur) => {
+      if (cur) URL.revokeObjectURL(cur.url);
+      return { blob, url: URL.createObjectURL(blob) };
+    });
+  };
+  const clearPhoto = () =>
+    setPhoto((cur) => {
+      if (cur) URL.revokeObjectURL(cur.url);
+      return null;
+    });
   const [supported, setSupported] = useState(true);
   // Live transcript (finals + interims) streamed into the recording box.
   const [liveTranscript, setLiveTranscript] = useState("");
@@ -119,14 +163,10 @@ export function LogForm({
   };
   // Latest values for the live-extraction loop, which runs outside of render.
   const fieldsRef = useRef(fields);
-  const roleRef = useRef(role);
   const statusRef = useRef<Status>(status);
   useEffect(() => {
     fieldsRef.current = fields;
   }, [fields]);
-  useEffect(() => {
-    roleRef.current = role;
-  }, [role]);
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
@@ -143,7 +183,7 @@ export function LogForm({
     const cur = fieldsRef.current;
     const draft: Record<string, string> = {};
     if (cur.name.trim()) draft.name = cur.name.trim();
-    if (roleRef.current.trim()) draft.role = roleRef.current.trim();
+    if (cur.role.trim()) draft.role = cur.role.trim();
     if (cur.company.trim()) draft.company = cur.company.trim();
     if (cur.school.trim()) draft.school = cur.school.trim();
     // While a recording is in flight the live value is this session's own
@@ -186,7 +226,7 @@ export function LogForm({
   // wins (spoken corrections apply), an omitted one keeps what's there, notes
   // append, and "also knows" unions.
   async function applyExtracted(extracted: ExtractedConnection, opts: { live: boolean }) {
-    setFields((cur) => {
+    const merge = (cur: Fields): Fields => {
       const keep = (key: keyof Fields) => opts.live && manualEditsRef.current.has(key);
       const pick = (key: keyof Fields, next: string | undefined) =>
         keep(key) ? cur[key] : next?.trim() || cur[key];
@@ -212,6 +252,7 @@ export function LogForm({
       else appended = `${base}\n${nextNotes}`;
       return {
         name: pick("name", extracted.name),
+        role: pick("role", extracted.role),
         alsoKnows: keep("alsoKnows")
           ? cur.alsoKnows
           : union(cur.alsoKnows, extracted.also_knows),
@@ -225,7 +266,22 @@ export function LogForm({
         instagram: pick("instagram", extracted.instagram),
         twitter: pick("twitter", extracted.twitter),
       };
-    });
+    };
+    // Glow every field this pass filled or changed, so the user sees what
+    // was just heard land.
+    const before = fieldsRef.current;
+    const after = merge(before);
+    const changed = (Object.keys(after) as (keyof Fields)[]).filter(
+      (k) => after[k] !== before[k] && after[k].trim()
+    );
+    setFields(merge);
+    if (changed.length > 0) {
+      setFlash((f) => {
+        const next = { ...f };
+        for (const k of changed) next[k] = (next[k] ?? 0) + 1;
+        return next;
+      });
+    }
     setAlsoKnowsRel((cur) => {
       const next = { ...cur };
       for (const k of extracted.also_knows ?? []) {
@@ -233,7 +289,6 @@ export function LogForm({
       }
       return next;
     });
-    if (extracted.role?.trim()) setRole(extracted.role.trim());
     const held = (choice: "group" | "leadHeat" | "followUp") =>
       opts.live && manualChoicesRef.current.has(choice);
     if (extracted.group_name && !held("group")) {
@@ -270,26 +325,29 @@ export function LogForm({
     }
   }
 
-  // Live fill: every pause in speech kicks off an interim extraction against
-  // the transcript so far, so the form populates while the user is still
-  // talking instead of only on stop.
-  const LIVE_DEBOUNCE_MS = 1100;
-  const LIVE_MIN_NEW_CHARS = 12;
+  // Live fill: interim extractions run back-to-back while the user talks,
+  // each on everything heard so far (including words still being
+  // recognized), so the form keeps up with speech instead of waiting for a
+  // pause. One pass in flight at a time; when it lands, the next starts on
+  // whatever was said meanwhile. A short idle timer flushes a small tail.
+  const LIVE_MIN_NEW_CHARS = 10;
+  const LIVE_IDLE_MS = 500;
   const liveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const liveAbortRef = useRef<AbortController | null>(null);
   const liveBusyRef = useRef(false);
+  // On from startRecording until stop — statusRef lags a render behind, so
+  // it can't fence off a pass that lands after stop.
+  const liveOnRef = useRef(false);
+  // Finals + interim words: fresher than transcriptRef, which only holds
+  // settled phrases for the authoritative final pass.
+  const liveTextRef = useRef("");
   const liveSentRef = useRef("");
   const [liveFilling, setLiveFilling] = useState(false);
 
   const runLiveExtract = async () => {
-    if (statusRef.current !== "recording") return;
-    const transcript = transcriptRef.current;
-    if (transcript.length - liveSentRef.current.length < LIVE_MIN_NEW_CHARS) return;
-    // One interim pass at a time; whatever was said meanwhile goes in the next.
-    if (liveBusyRef.current) {
-      scheduleLiveExtract();
-      return;
-    }
+    if (!liveOnRef.current || liveBusyRef.current) return;
+    const transcript = liveTextRef.current;
+    if (!transcript || transcript === liveSentRef.current) return;
     liveBusyRef.current = true;
     liveSentRef.current = transcript;
     setLiveFilling(true);
@@ -300,22 +358,31 @@ export function LogForm({
         interim: true,
         signal: controller.signal,
       });
-      if (statusRef.current === "recording") await applyExtracted(extracted, { live: true });
+      if (liveOnRef.current) await applyExtracted(extracted, { live: true });
     } catch {
       // Interim passes fail silently — the final pass on stop is authoritative.
     } finally {
-      liveBusyRef.current = false;
-      liveAbortRef.current = null;
-      setLiveFilling(false);
+      if (liveAbortRef.current === controller) {
+        liveBusyRef.current = false;
+        liveAbortRef.current = null;
+        setLiveFilling(false);
+        kickLiveExtract();
+      }
     }
   };
 
-  const scheduleLiveExtract = () => {
+  const kickLiveExtract = () => {
     if (liveTimerRef.current) clearTimeout(liveTimerRef.current);
-    liveTimerRef.current = setTimeout(runLiveExtract, LIVE_DEBOUNCE_MS);
+    liveTimerRef.current = null;
+    if (!liveOnRef.current || liveBusyRef.current) return;
+    const text = liveTextRef.current;
+    if (text === liveSentRef.current) return;
+    if (text.length - liveSentRef.current.length >= LIVE_MIN_NEW_CHARS) runLiveExtract();
+    else liveTimerRef.current = setTimeout(runLiveExtract, LIVE_IDLE_MS);
   };
 
   const cancelLiveExtract = () => {
+    liveOnRef.current = false;
     if (liveTimerRef.current) clearTimeout(liveTimerRef.current);
     liveTimerRef.current = null;
     liveAbortRef.current?.abort();
@@ -345,26 +412,26 @@ export function LogForm({
     let finalTranscript = "";
     recognition.onresult = (event) => {
       let interim = "";
-      let settled = false;
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
-        if (result.isFinal) {
-          finalTranscript += result[0].transcript + " ";
-          settled = true;
-        } else interim += result[0].transcript;
+        if (result.isFinal) finalTranscript += result[0].transcript + " ";
+        else interim += result[0].transcript;
       }
       transcriptRef.current = finalTranscript.trim();
-      setLiveTranscript((finalTranscript + interim).trim());
-      // Only a settled phrase is worth extracting; interim words churn.
-      if (settled) scheduleLiveExtract();
+      liveTextRef.current = (finalTranscript + interim).trim();
+      setLiveTranscript(liveTextRef.current);
+      kickLiveExtract();
     };
     recognition.onerror = (event) => {
+      cancelLiveExtract();
       setError(`Speech recognition error: ${event.error}`);
       setStatus("idle");
     };
 
     transcriptRef.current = "";
     liveSentRef.current = "";
+    liveTextRef.current = "";
+    liveOnRef.current = true;
     baseNotesRef.current = fieldsRef.current.whatTheyDo;
     manualEditsRef.current = new Set();
     manualChoicesRef.current = new Set();
@@ -398,7 +465,50 @@ export function LogForm({
     }
   }
 
+  function resetForm() {
+    clearPhoto();
+    setFields(EMPTY_FIELDS);
+    setGroupId(null);
+    setLeadHeat(DEFAULT_LEAD_HEAT);
+    setAlsoKnowsRel({});
+    setFollowUpHours(undefined);
+    setFollowUpAbout("");
+    transcriptRef.current = "";
+  }
+
+  // Throw away the draft: stop the mic without a final pass, drop any live
+  // pass in flight, and clear the form and transcript.
+  function handleCancel() {
+    const recognition = recognitionRef.current;
+    if (recognition) {
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.abort();
+      recognitionRef.current = null;
+    }
+    cancelLiveExtract();
+    resetForm();
+    setLiveTranscript("");
+    setError(null);
+    setSaved(false);
+    setStatus("idle");
+  }
+
+  const hasDraft =
+    status === "recording" ||
+    Object.values(fields).some((v) => v.trim()) ||
+    !!liveTranscript ||
+    groupId !== null ||
+    leadHeat !== DEFAULT_LEAD_HEAT ||
+    followUpHours !== undefined ||
+    !!followUpAbout.trim() ||
+    photo !== null;
+
   async function handleSave() {
+    // Only from idle: a save while the final pass is still extracting lands
+    // without what that pass adds (a spoken group, a follow-up), and the pass
+    // then writes those onto the freshly cleared form instead.
+    if (status !== "idle") return;
     if (!fields.name.trim()) {
       setError("A name is required.");
       return;
@@ -406,10 +516,10 @@ export function LogForm({
     setStatus("saving");
     setError(null);
     try {
-      await saveConnection(
+      const personId = await saveConnection(
         {
           name: fields.name.trim(),
-          role: role.trim() || undefined,
+          role: fields.role.trim() || undefined,
           company: fields.company.trim() || undefined,
           met_at: fields.event.trim() || undefined,
           school: fields.school.trim() || undefined,
@@ -431,14 +541,19 @@ export function LogForm({
         },
         transcriptRef.current
       );
-      setFields(EMPTY_FIELDS);
-      setRole("");
-      setGroupId(null);
-      setLeadHeat(undefined);
-      setAlsoKnowsRel({});
-      setFollowUpHours(undefined);
-      setFollowUpAbout("");
-      transcriptRef.current = "";
+      // The person is saved either way; a failed photo upload just says so.
+      let photoFailed = false;
+      if (photo) {
+        try {
+          const form = new FormData();
+          form.append("photo", photo.blob, "photo.jpg");
+          await setPersonPhoto(personId, form);
+        } catch {
+          photoFailed = true;
+        }
+      }
+      resetForm();
+      if (photoFailed) setError("Saved — but the photo didn't upload. Add it from their page.");
       setSaved(true);
       setStatus("idle");
       router.refresh();
@@ -461,7 +576,7 @@ export function LogForm({
         else if (status === "idle") startRecording();
       },
       save: () => {
-        if (status !== "saving" && fields.name.trim()) handleSave();
+        if (status === "idle" && fields.name.trim()) handleSave();
       },
     };
   });
@@ -493,13 +608,17 @@ export function LogForm({
     // Autocomplete against the existing network: "single" completes the whole
     // field, "csv" completes only the name after the last comma.
     suggest?: "single" | "csv";
+    // Rendered two-up in a shared row.
+    pair?: boolean;
   }[] = [
     { key: "name", label: "Name", placeholder: "who did you meet?", suggest: "single" },
+    { key: "role", label: "Role", placeholder: "their title or position" },
     {
       key: "whatTheyDo",
       label: "What they Do",
       placeholder: "what they work on, what they're looking for, anything worth remembering",
       multiline: true,
+      lines: 3,
     },
     {
       key: "howTheyHelp",
@@ -508,12 +627,45 @@ export function LogForm({
       multiline: true,
       lines: 3,
     },
-    { key: "alsoKnows", label: "Also knows…", placeholder: "names, comma-sep", suggest: "csv" },
-    { key: "event", label: "Met because…", placeholder: "how you met" },
+    { key: "alsoKnows", label: "Also knows…", placeholder: "names, comma-sep", suggest: "csv", pair: true },
+    { key: "event", label: "Met because…", placeholder: "how you met", pair: true },
   ];
 
+  const renderRow = (row: (typeof rows)[number]) => (
+    <label key={row.key} className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+      {row.label}
+      <Glow nonce={flash[row.key]} className="mt-1">
+        {row.suggest ? (
+          <PersonSuggestInput
+            value={fields[row.key]}
+            onChange={set(row.key)}
+            people={networkPeople}
+            mode={row.suggest}
+            placeholder={status === "recording" ? "Listening…" : (row.placeholder ?? "")}
+            className="w-full rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
+          />
+        ) : row.multiline ? (
+          <textarea
+            rows={row.lines ?? 4}
+            value={fields[row.key]}
+            onChange={(e) => set(row.key)(e.target.value)}
+            placeholder={status === "recording" ? "Listening…" : (row.placeholder ?? "")}
+            className="w-full resize-y rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
+          />
+        ) : (
+          <input
+            value={fields[row.key]}
+            onChange={(e) => set(row.key)(e.target.value)}
+            placeholder={status === "recording" ? "Listening…" : (row.placeholder ?? "")}
+            className="w-full rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
+          />
+        )}
+      </Glow>
+    </label>
+  );
+
   const halfInput =
-    "mt-1 w-full rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300";
+    "w-full rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300";
   const halfRows: [keyof Fields, string, string][][] = [
     [
       ["school", "School", "where they studied"],
@@ -534,48 +686,24 @@ export function LogForm({
     // choices and the voice controls on the right.
     <div className="flex flex-1 flex-col rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-6 lg:flex-row lg:items-stretch lg:gap-8 lg:px-8 lg:py-8">
       <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1">
-        {rows.map((row) => (
-          <label key={row.key} className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
-            {row.label}
-            {row.suggest ? (
-              <PersonSuggestInput
-                value={fields[row.key]}
-                onChange={set(row.key)}
-                people={networkPeople}
-                mode={row.suggest}
-                placeholder={status === "recording" ? "Listening…" : (row.placeholder ?? "")}
-                className="mt-1 w-full rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
-              />
-            ) : row.multiline ? (
-              <textarea
-                rows={row.lines ?? 4}
-                value={fields[row.key]}
-                onChange={(e) => set(row.key)(e.target.value)}
-                placeholder={status === "recording" ? "Listening…" : (row.placeholder ?? "")}
-                className="mt-1 w-full resize-y rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
-              />
-            ) : (
-              <input
-                value={fields[row.key]}
-                onChange={(e) => set(row.key)(e.target.value)}
-                placeholder={status === "recording" ? "Listening…" : (row.placeholder ?? "")}
-                className="mt-1 w-full rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
-              />
-            )}
-          </label>
-        ))}
+        {rows.filter((r) => !r.pair).map(renderRow)}
+        <div className="grid grid-cols-2 gap-3">
+          {rows.filter((r) => r.pair).map(renderRow)}
+        </div>
 
         {halfRows.map((pair) => (
           <div key={pair[0][0]} className="grid grid-cols-2 gap-3">
             {pair.map(([key, label, placeholder]) => (
               <label key={key} className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
                 {label}
-                <input
-                  value={fields[key]}
-                  onChange={(e) => set(key)(e.target.value)}
-                  placeholder={status === "recording" ? "Listening…" : placeholder}
-                  className={halfInput}
-                />
+                <Glow nonce={flash[key]} className="mt-1">
+                  <input
+                    value={fields[key]}
+                    onChange={(e) => set(key)(e.target.value)}
+                    placeholder={status === "recording" ? "Listening…" : placeholder}
+                    className={halfInput}
+                  />
+                </Glow>
               </label>
             ))}
           </div>
@@ -585,13 +713,14 @@ export function LogForm({
           Contact
           <div className="mt-1 grid grid-cols-2 gap-1.5">
             {contactRows.map((row) => (
+              <Glow key={row.key} nonce={flash[row.key]} className="min-w-0">
               <input
-                key={row.key}
                 value={fields[row.key]}
                 onChange={(e) => set(row.key)(e.target.value)}
                 placeholder={row.placeholder}
-                className="min-w-0 flex-1 rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
+                className="w-full min-w-0 rounded-xl border-0 bg-white dark:bg-neutral-800 px-3 py-2 text-sm font-normal text-neutral-900 dark:text-neutral-50 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-900 dark:focus:ring-neutral-300"
               />
+              </Glow>
             ))}
           </div>
         </div>
@@ -600,6 +729,43 @@ export function LogForm({
       {/* Right column on desktop: the taxonomy choices (group, follow-up)
           plus the voice controls. Stacks under the fields on phones. */}
       <div className="mt-4 flex flex-col gap-4 lg:mt-0 lg:w-[380px] lg:shrink-0 xl:w-[420px]">
+        <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
+          Photo
+          <div className="mt-1.5 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setCapturingPhoto(true)}
+              aria-label={photo ? "Retake photo" : "Take photo"}
+              className="group relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white text-neutral-400 hover:bg-neutral-200 hover:text-neutral-700 dark:bg-neutral-800 dark:text-neutral-500 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
+            >
+              {photo ? (
+                // eslint-disable-next-line @next/next/no-img-element -- local blob preview
+                <img src={photo.url} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <svg aria-hidden viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="1.6">
+                  <path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.5-2h6l1.5 2h2A1.5 1.5 0 0 1 20 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5z" strokeLinejoin="round" />
+                  <circle cx="12" cy="12.5" r="3.5" />
+                </svg>
+              )}
+            </button>
+            <span className="text-xs font-normal text-neutral-500 dark:text-neutral-400">
+              {photo ? (
+                <>
+                  Shows on their page.{" "}
+                  <button type="button" onClick={clearPhoto} className="underline underline-offset-2 hover:text-neutral-900 dark:hover:text-neutral-50">
+                    Remove
+                  </button>
+                </>
+              ) : (
+                "Snap them so you remember the face."
+              )}
+            </span>
+          </div>
+          {capturingPhoto && (
+            <PhotoCapture onCapture={takePhoto} onClose={() => setCapturingPhoto(false)} />
+          )}
+        </div>
+
         <div className="text-sm font-semibold text-neutral-900 dark:text-neutral-50">
           Group
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
@@ -616,8 +782,8 @@ export function LogForm({
                   className={
                     "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-normal " +
                     (active
-                      ? "bg-neutral-900 text-neutral-50 dark:bg-neutral-100 dark:text-neutral-900"
-                      : "bg-white dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300")
+                      ? "bg-neutral-900 text-neutral-50 dark:bg-neutral-100 dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-300"
+                      : "bg-white dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700")
                   }
                 >
                   <span
@@ -665,7 +831,7 @@ export function LogForm({
                 />
                 <button
                   type="submit"
-                  className="rounded-full bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:text-neutral-50 px-3 py-1.5 text-xs font-medium text-neutral-50"
+                  className="rounded-full bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:text-neutral-50 px-3 py-1.5 text-xs font-medium text-neutral-50 hover:bg-neutral-700 dark:hover:bg-neutral-300"
                 >
                   Add
                 </button>
@@ -674,7 +840,7 @@ export function LogForm({
               <button
                 type="button"
                 onClick={() => setAddingGroup(true)}
-                className="rounded-full bg-white dark:bg-neutral-800 px-3 py-1.5 text-xs font-normal text-neutral-400 dark:text-neutral-500"
+                className="rounded-full bg-white dark:bg-neutral-800 px-3 py-1.5 text-xs font-normal text-neutral-400 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-700"
               >
                 + New
               </button>
@@ -707,8 +873,8 @@ export function LogForm({
                   className={
                     "h-9 w-9 rounded-full text-xs font-medium " +
                     (active
-                      ? "bg-neutral-900 text-neutral-50 dark:bg-neutral-100 dark:text-neutral-900"
-                      : "bg-white text-neutral-400 dark:bg-neutral-800 dark:text-neutral-500")
+                      ? "bg-neutral-900 text-neutral-50 dark:bg-neutral-100 dark:text-neutral-900 hover:bg-neutral-700 dark:hover:bg-neutral-300"
+                      : "bg-white text-neutral-400 dark:bg-neutral-800 dark:text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-700")
                   }
                 >
                   {n}
@@ -734,8 +900,8 @@ export function LogForm({
                 }}
                 className={
                   followUpHours === opt.hours
-                    ? "rounded-full bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:text-neutral-50 px-3 py-1.5 text-xs font-medium text-neutral-50"
-                    : "rounded-full bg-white dark:bg-neutral-800 px-3 py-1.5 text-xs font-normal text-neutral-600 dark:text-neutral-300"
+                    ? "rounded-full bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 dark:text-neutral-50 px-3 py-1.5 text-xs font-medium text-neutral-50 hover:bg-neutral-700 dark:hover:bg-neutral-300"
+                    : "rounded-full bg-white dark:bg-neutral-800 px-3 py-1.5 text-xs font-normal text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700"
                 }
               >
                 {opt.label}
@@ -764,6 +930,16 @@ export function LogForm({
       )}
 
       <div className="mt-auto flex flex-col items-center gap-3 pt-6">
+        {/* Stays up after recording stops and after saving, so the user can
+            check what was heard; cleared when the next recording starts. */}
+        {status !== "recording" && liveTranscript && (
+          <div className="w-full rounded-2xl bg-white p-4 dark:bg-neutral-800">
+            <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+              Transcript
+            </span>
+            <p className="mt-2 text-sm text-neutral-900 dark:text-neutral-50">{liveTranscript}</p>
+          </div>
+        )}
         {status === "recording" && (
           <div className="w-full rounded-2xl bg-white p-4 dark:bg-neutral-800">
             <style>{`@keyframes guyWave { 0%, 100% { transform: scaleY(0.3); } 50% { transform: scaleY(1); } }`}</style>
@@ -814,8 +990,8 @@ export function LogForm({
             aria-keyshortcuts="Alt+R"
             className={
               status === "recording"
-                ? "h-20 w-20 animate-pulse rounded-full bg-red-600"
-                : "h-20 w-20 rounded-full bg-neutral-900 dark:bg-neutral-100"
+                ? "h-20 w-20 animate-pulse rounded-full bg-red-600 hover:scale-105 hover:bg-red-700"
+                : "h-20 w-20 rounded-full bg-neutral-900 dark:bg-neutral-100 hover:scale-105 hover:bg-neutral-700 dark:hover:bg-neutral-300"
             }
           />
         )}
@@ -829,18 +1005,29 @@ export function LogForm({
             {status === "recording" ? "to stop" : "to record"}
           </p>
         )}
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={status === "saving" || !fields.name.trim()}
-          aria-keyshortcuts="Alt+S"
-          className="rounded-full bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 px-6 py-2.5 text-sm font-medium text-neutral-50 disabled:opacity-30"
-        >
-          {status === "saving" ? "Saving…" : "Save"}
-          <span aria-hidden className="ml-2 hidden text-xs opacity-50 sm:inline">
-            ⌥S
-          </span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={status !== "idle" || !fields.name.trim()}
+            aria-keyshortcuts="Alt+S"
+            className="rounded-full bg-neutral-900 dark:bg-neutral-100 dark:text-neutral-900 px-6 py-2.5 text-sm font-medium text-neutral-50 enabled:hover:bg-neutral-700 dark:enabled:hover:bg-neutral-300 disabled:opacity-30"
+          >
+            {status === "saving" ? "Saving…" : "Save"}
+            <span aria-hidden className="ml-2 hidden text-xs opacity-50 sm:inline">
+              ⌥S
+            </span>
+          </button>
+          {hasDraft && status !== "processing" && status !== "saving" && (
+            <button
+              type="button"
+              onClick={handleCancel}
+              className="rounded-full px-5 py-2.5 text-sm font-medium text-neutral-600 ring-1 ring-neutral-300 hover:bg-neutral-200 hover:text-neutral-900 dark:text-neutral-300 dark:ring-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-50"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
       </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { anthropic } from "@/lib/anthropic";
-import type { PersonUpdate } from "@/types/extraction";
+import type { FollowUpEdit, PersonUpdate } from "@/types/extraction";
 
 const UPDATE_PERSON_TOOL = {
   name: "update_person",
@@ -52,7 +52,33 @@ const UPDATE_PERSON_TOOL = {
       follow_up_hours: {
         type: "number",
         description:
-          "Hours from now for a new follow-up reminder, if the user asked for one (e.g. '1 day' -> 24, 'next week' -> 168).",
+          "Hours from now for a NEW follow-up reminder, if the user asked for one (e.g. '1 day' -> 24, 'next week' -> 168). Never use this to change an existing follow-up — that's follow_up_edits.",
+      },
+      follow_up_edits: {
+        type: "array",
+        description:
+          "Changes to the person's EXISTING follow-ups (listed in the context as F1, F2, …) — 'move it to Friday at 3', 'push the follow-up a week', 'change it to: send the deck', 'mark it done', 'cancel the reminder'. When the user says 'the follow-up' and only one exists, it's that one.",
+        items: {
+          type: "object",
+          properties: {
+            ref: { type: "string", description: "Which follow-up, e.g. 'F1'." },
+            due_at: {
+              type: "string",
+              description:
+                "New due time as ISO 8601 with the same UTC offset as the current time given in the context. Resolve relative phrases ('Friday at 3pm', 'push it a week' — from its current due time) against that. A day with no time keeps the current time of day.",
+            },
+            notes: {
+              type: "string",
+              description: "Replacement text for what the follow-up is about, short imperative phrase.",
+            },
+            action: {
+              type: "string",
+              enum: ["complete", "dismiss"],
+              description: "'complete' when done ('mark it done', 'I already did it'); 'dismiss' to cancel it.",
+            },
+          },
+          required: ["ref"],
+        },
       },
       follow_up_about: {
         type: "string",
@@ -85,7 +111,7 @@ const UPDATE_PERSON_TOOL = {
 };
 
 export async function POST(request: Request) {
-  const { transcript, personName, currentNotes, groups, people, vocabulary } =
+  const { transcript, personName, currentNotes, groups, people, vocabulary, followUps, now } =
     await request.json();
 
   if (!transcript || typeof transcript !== "string") {
@@ -100,6 +126,19 @@ export async function POST(request: Request) {
   }
   if (Array.isArray(groups) && groups.length > 0) {
     contextParts.push(`The user's existing groups: ${groups.join(", ")}`);
+  }
+  // Pending follow-ups, numbered F1… so the model can point at one without
+  // copying ids. Times arrive already in the user's local time with offset.
+  const followUpIds: string[] = [];
+  if (Array.isArray(followUps) && followUps.length > 0) {
+    const lines = (followUps as { id: string; due: string; notes: string | null }[]).map((f, i) => {
+      followUpIds.push(f.id);
+      return `F${i + 1}: due ${f.due}${f.notes ? ` — ${f.notes}` : ""}`;
+    });
+    contextParts.push(`This contact's pending follow-ups:\n${lines.join("\n")}`);
+  }
+  if (typeof now === "string") {
+    contextParts.push(`Current time (the user's timezone): ${now}`);
   }
   if (Array.isArray(vocabulary) && vocabulary.length > 0) {
     contextParts.push(
@@ -139,6 +178,18 @@ Instruction: "${transcript}"`,
   }
 
   const update = toolUse.input as PersonUpdate;
+  // Map F1/F2 refs back to real ids; drop edits that point at nothing.
+  if (update.follow_up_edits) {
+    update.follow_up_edits = (
+      update.follow_up_edits as unknown as ({ ref?: string } & Omit<FollowUpEdit, "id">)[]
+    )
+      .map(({ ref, ...rest }) => {
+        const id = followUpIds[Number(ref?.replace(/\D/g, "")) - 1];
+        return id ? { ...rest, id } : null;
+      })
+      .filter((e): e is FollowUpEdit => e !== null);
+    if (update.follow_up_edits.length === 0) delete update.follow_up_edits;
+  }
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "No change recognized in the instruction" }, { status: 422 });
   }

@@ -17,13 +17,18 @@ export function NetworkDesk({
   connections,
   groups,
   followUps,
+  upcomingFollowUps,
   profile,
+  orgColors,
 }: {
   people: Person[];
   connections: Connection[];
   groups: Group[];
   followUps: DueFollowUp[];
+  upcomingFollowUps: DueFollowUp[];
   profile: Profile | null;
+  // Org hub colors keyed "school:columbia".
+  orgColors: Record<string, string>;
 }) {
   const [pinnedIds, setPinnedIds] = useState<readonly string[]>([]);
   const orgs = useMemo(() => deriveOrgHubs(people, profile), [people, profile]);
@@ -41,6 +46,7 @@ export function NetworkDesk({
           connections={connections}
           groups={groups}
           profile={profile}
+          orgColors={orgColors}
           pinnedIds={pinnedIds}
           onPinnedIdsChange={setPinnedIds}
           // The side panel owns the cards from `lg` up.
@@ -50,7 +56,7 @@ export function NetworkDesk({
 
       {/* Phone: the collapsed bar sits under the graph. */}
       <div className="shrink-0 lg:hidden">
-        <FollowUpBar followUps={followUps} />
+        <FollowUpBar followUps={followUps} upcoming={upcomingFollowUps} />
       </div>
 
       {/* Desktop: half detail panels, half follow-ups. */}
@@ -84,6 +90,7 @@ export function NetworkDesk({
                   key={entry.type === "org" ? entry.org.id : entry.person.id}
                   entry={entry}
                   groups={groups}
+                  orgColors={orgColors}
                   onUnpin={unpin}
                   className="shrink-0 rounded-2xl bg-white dark:bg-neutral-800 p-4 shadow-sm"
                 />
@@ -91,7 +98,12 @@ export function NetworkDesk({
             )}
           </div>
         </div>
-        <FollowUpBar followUps={followUps} alwaysOpen className="flex-1" />
+        <FollowUpBar
+          followUps={followUps}
+          upcoming={upcomingFollowUps}
+          alwaysOpen
+          className="flex-1"
+        />
       </div>
     </div>
   );

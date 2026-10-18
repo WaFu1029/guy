@@ -32,6 +32,16 @@ export interface ExtractedConnection {
   follow_up_about?: string;
 }
 
+// A spoken change to one of the person's existing follow-ups.
+export interface FollowUpEdit {
+  // The follow-up's id (the route maps the model's F1/F2 refs back to ids).
+  id: string;
+  // New due time, ISO 8601.
+  due_at?: string;
+  notes?: string;
+  action?: "complete" | "dismiss";
+}
+
 // Patch extracted from a voice command on a person's profile page.
 export interface PersonUpdate {
   // A corrected name — only set when the user is fixing a misheard spelling.
@@ -52,4 +62,5 @@ export interface PersonUpdate {
   also_knows?: KnownPerson[];
   follow_up_hours?: number;
   follow_up_about?: string;
+  follow_up_edits?: FollowUpEdit[];
 }

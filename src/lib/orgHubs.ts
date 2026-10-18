@@ -122,3 +122,45 @@ export function resolvePins(
     })
     .filter((e) => e !== null);
 }
+
+// Hub id "org:school:columbia" ↔ style key "school:columbia" ↔ page URL.
+export const orgStyleKey = (hubId: string) => hubId.replace(/^org:/, "");
+export function orgHref(hubId: string): string {
+  const [kind, ...rest] = orgStyleKey(hubId).split(":");
+  return `/orgs/${kind}/${encodeURIComponent(rest.join(":"))}`;
+}
+
+// Everyone (the user included) whose company/school canonicalizes to `key`.
+// Unlike deriveOrgHubs this has no ≥2 threshold, so an org page still works
+// for an org only one person belongs to.
+export function orgMembers(
+  people: Person[],
+  profile: Profile | null,
+  kind: "company" | "school",
+  key: string
+): { members: OrgMember[]; label: string | null } {
+  const labelCounts = new Map<string, number>();
+  const members: OrgMember[] = [];
+  const consider = (value: string | null, member: OrgMember) => {
+    const c = value ? canonicalOrg(value, kind) : null;
+    if (!c || c.key !== key) return;
+    members.push(member);
+    labelCounts.set(c.label, (labelCounts.get(c.label) ?? 0) + 1);
+  };
+  for (const p of people) {
+    consider(p[kind], { id: p.id, name: p.name, role: p.role, groupId: p.group_id, isSelf: false });
+  }
+  if (profile) {
+    consider(profile[kind], {
+      id: SELF_ID,
+      name: profile.name?.trim() || "You",
+      role: profile.role,
+      groupId: null,
+      isSelf: true,
+    });
+  }
+  let label: string | null = null;
+  let best = 0;
+  for (const [l, n] of labelCounts) if (n > best) [label, best] = [l, n];
+  return { members, label };
+}

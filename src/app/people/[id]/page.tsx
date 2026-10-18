@@ -11,6 +11,7 @@ import { LeadHeatPicker } from "@/components/LeadHeatPicker";
 import { PersonNameEdit } from "@/components/PersonNameEdit";
 import { PersonFollowUps } from "@/components/PersonFollowUps";
 import { PersonGroupPicker } from "@/components/PersonGroupPicker";
+import { PersonPhoto } from "@/components/PersonPhoto";
 
 export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -43,6 +44,12 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
       .order("created_at", { ascending: true }),
   ]);
 
+  // Private bucket: a short-lived signed URL, minted per page render.
+  const photoUrl = person.photo_path
+    ? ((await supabase.storage.from("person-photos").createSignedUrl(person.photo_path, 60 * 60))
+        .data?.signedUrl ?? null)
+    : null;
+
   return (
     <div className="mx-auto w-full max-w-md px-4 pb-8 pt-2 lg:max-w-7xl lg:px-7">
       <Link href="/" className="text-sm text-neutral-400 dark:text-neutral-500 hover:underline">
@@ -53,7 +60,12 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           hangs off it — connections, follow-ups, danger zone — on the right. */}
       <div className="mt-3 flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:items-start lg:gap-4">
       <div className="rounded-3xl bg-neutral-100 dark:bg-neutral-900 dark:text-neutral-50 px-5 py-6 lg:px-7">
-        <PersonNameEdit personId={person.id} name={person.name} />
+        <div className="flex items-center gap-4">
+          <PersonPhoto personId={person.id} name={person.name} url={photoUrl} />
+          <div className="min-w-0 flex-1">
+            <PersonNameEdit personId={person.id} name={person.name} />
+          </div>
+        </div>
 
         <LeadHeatPicker personId={person.id} heat={person.lead_heat} />
 
@@ -75,6 +87,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
             groupNames={(groups ?? []).map((g) => g.name)}
             peopleNames={(allPeople ?? []).map(personContextLine)}
             vocabulary={(vocab ?? []).map(vocabLine)}
+            followUps={(followUps ?? []).filter((f) => f.status === "pending" || f.status === "snoozed")}
           />
         </div>
       </div>
@@ -89,9 +102,22 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
                   (c as unknown as { from: { name: string } | null }).from?.name ?? "You";
                 const toName =
                   (c as unknown as { to: { name: string } | null }).to?.name ?? "You";
+                // Each end links to that person's profile — except You and the
+                // person this page is already about.
+                const end = (id: string | null, name: string) =>
+                  id && id !== person.id ? (
+                    <Link
+                      href={`/people/${id}`}
+                      className="underline decoration-neutral-300 underline-offset-2 hover:text-neutral-900 hover:decoration-neutral-900 dark:decoration-neutral-600 dark:hover:text-neutral-50 dark:hover:decoration-neutral-50"
+                    >
+                      {name}
+                    </Link>
+                  ) : (
+                    name
+                  );
                 return (
                   <li key={c.id} className="rounded-xl bg-white dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-200">
-                    {fromName} → {toName}
+                    {end(c.from_person_id, fromName)} → {end(c.to_person_id, toName)}
                     {c.label && (
                       <span className="ml-2 text-neutral-400 dark:text-neutral-500">
                         ({c.label})

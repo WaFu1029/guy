@@ -52,3 +52,53 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
+
+/* Tailwind v4 dropped the pointer cursor on buttons; restore it, and ease
+   hover color/size changes so they don't snap. */
+@layer base {
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+  button {
+    transition: background-color 150ms, color 150ms, transform 150ms;
+  }
+}
+
+/* Live-fill glow on the log form: a sunset ring + halo that sweeps across a
+   field and fades when extraction fills it. Sits behind the (opaque) input,
+   so only the 2px rim and the blurred halo show. */
+.guy-glow {
+  position: absolute;
+  inset: -2px;
+  z-index: -1;
+  border-radius: 14px;
+  pointer-events: none;
+  background: linear-gradient(110deg, #ffb347, #ff7a3d, #ff4f6d, #c04cfd, #ff7a3d, #ffb347);
+  background-size: 300% 100%;
+  opacity: 0;
+  animation: guy-glow-fade 1.8s ease-out, guy-glow-sweep 1.8s ease-in-out;
+}
+.guy-glow::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  background: inherit;
+  background-size: inherit;
+  filter: blur(10px);
+  opacity: 0.75;
+  animation: guy-glow-sweep 1.8s ease-in-out;
+}
+@keyframes guy-glow-fade {
+  0% { opacity: 0; }
+  12% { opacity: 1; }
+  60% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@keyframes guy-glow-sweep {
+  from { background-position: 0% 50%; }
+  to { background-position: 100% 50%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .guy-glow, .guy-glow::after { animation: guy-glow-fade 1.2s linear; }
+}

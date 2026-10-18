@@ -51,6 +51,8 @@ create table if not exists people (
   met_at text,
   -- How hot the lead is, 1 (cold) to 5 (hot). Null = unrated.
   lead_heat smallint check (lead_heat between 1 and 5),
+  -- A photo of the person: a path in the private person-photos bucket.
+  photo_path text,
   met_date date not null default current_date,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -158,6 +160,35 @@ drop policy if exists "follow_ups owner access" on follow_ups;
 create policy "follow_ups owner access" on follow_ups
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+-- Per-user styling for derived org hubs (schools/companies). Hubs themselves
+-- are never stored; this keys a color onto the canonical "kind:key" id.
+create table if not exists org_styles (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  org_key text not null,
+  color text not null,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, org_key)
+);
+alter table org_styles enable row level security;
+drop policy if exists "org_styles owner access" on org_styles;
+create policy "org_styles owner access" on org_styles
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+
+-- Private bucket; each user reads and writes only under their own
+-- "<user_id>/" folder.
+insert into storage.buckets (id, name, public)
+values ('person-photos', 'person-photos', false)
+on conflict (id) do nothing;
+drop policy if exists "person-photos owner access" on storage.objects;
+create policy "person-photos owner access" on storage.objects
+  for all to authenticated
+  using (bucket_id = 'person-photos' and (storage.foldername(name))[1] = auth.uid()::text)
+  with check (bucket_id = 'person-photos' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- Migration for databases created before person photos existed:
+--   alter table people add column if not exists photo_path text;
+--   (then run the org_styles + person-photos blocks above)
 -- Migration for databases created before the contact platform fields existed:
 --   alter table people add column if not exists phone text;
 --   alter table people add column if not exists email text;
